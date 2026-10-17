@@ -11,10 +11,13 @@
 - `will-navigate` blockiert; `setWindowOpenHandler` → nur `https://` im System-Browser, sonst verweigert.
 - Modellantworten werden als React-Elemente gerendert, nie als HTML (Unit-Test: kein `<img>`/`<script>`).
 - API-Schlüssel nur im Main-Prozess aus Umgebungsvariablen; nie im Renderer, in Logs oder Dateien.
+- **Bestätigungs-Ledger im Main:** `preview()` hinterlegt das Manifest unter einer Einmal-ID (5 min); externer `run()` sendet nur genau diesen Payload. Ohne gültige ID: kein Versand (E2E-geprüft).
+- `setPermissionRequestHandler`/`setPermissionCheckHandler` verweigern alles; `will-attach-webview` und `will-redirect` blockiert; laufende Anfragen werden bei `before-quit` abgebrochen.
+- Datei-Dialog: nur reguläre Dateien, Lesen auf 200 KB begrenzt (kein Volllesen großer Dateien).
 
 ## Schwärzung
 
-`src/core/redaction.ts`: Private Keys, Anthropic/OpenAI/GitHub/AWS/Slack/Google-Keys, JWT, Bearer-Tokens, Passwörter in URLs, `password=`/`api_key:`-Zuweisungen, E-Mail, IBAN. Läuft in `buildManifest` (jeder Provider-Aufruf) und im Claude-Code-Hook vor dem Schreiben. **Grenze:** Musterbasiert — unbekannte Formate (z. B. proprietäre Tokens ohne Präfix, Secrets in Base64) werden nicht erkannt. Deshalb zusätzlich: Manifest mit exaktem Payload vor jedem externen Versand.
+`src/core/redaction.ts`: Private Keys, Anthropic/OpenAI/Stripe/npm/GitLab/GitHub/AWS/Slack/Google-Keys, JWT, Bearer- und Basic-Auth, `curl -u`, Passwörter in URLs, Zuweisungen an `*password*`/`*secret*`/`*token*`/`*api_key*` (gequotet immer; ungequotet nur Buchstaben+Ziffern-Werte, damit Code wie `getPassword(user)` erhalten bleibt), E-Mail (außer `git@`), IBAN mit Prüfsumme. Läuft in `buildManifest` (jeder Provider-Aufruf) und im Claude-Code-Hook vor dem Schreiben. **Grenze:** Musterbasiert — unbekannte Formate (z. B. proprietäre Tokens ohne Präfix, Secrets in Base64) werden nicht erkannt. Deshalb zusätzlich: Manifest mit exaktem Payload vor jedem externen Versand.
 
 ## Threat Model (Kurzfassung)
 
@@ -22,15 +25,16 @@
 |---|---|---|
 | Prompt Injection über Kontext | Kontext in `<kontext>`-Hüllen, Label escaped, Systemprompt erklärt „untrusted data“; Mentor hat keine Werkzeuge → Injection kann nichts ausführen | Modell kann trotzdem irreführend antworten |
 | Datenleck an externen Anbieter | Manifest-Bestätigung, Schwärzung, Größenbudget 60 000 Zeichen, Kontext nicht persistiert | Nutzer:in bestätigt Inhalt mit nicht erkanntem Secret |
-| Kompromittierter Renderer | Sandbox, CSP, kein Node, schmale IPC; Main baut Payload selbst | Renderer könnte via IPC ohne UI-Bestätigung `run` aufrufen (Bestätigung ist UI-seitig) — siehe offene Punkte |
+| Kompromittierter Renderer | Sandbox, CSP, kein Node, schmale IPC; externer Versand nur mit Main-seitigem Einmal-Manifest | Ein kompromittierter Renderer könnte `preview` und dann `run` ohne Nutzeraktion aufrufen; das Manifest zeigt aber nur, was ohnehin im Renderer lag. Abhilfe später: nativer Bestätigungsdialog im Main |
 | Überprivilegierte Prozesse | Keine Ausführung, keine Schreibzugriffe außer eigener State-/Exportdatei (Ziel per Dialog) | — |
-| Manipulierte Hook-Inhalte | Inbox ist Daten; Übernahme nur manuell; Parser verwirft defekte Zeilen | Lokaler Angreifer mit Schreibrecht auf `~/.ki-it-mentor` |
+| Manipulierte Hook-Inhalte | Inbox ist Daten; Übernahme nur manuell; Parser verwirft defekte Zeilen; Verzeichnis 0700, Datei 0600 | Lokaler Angreifer mit Schreibrecht auf `~/.ki-it-mentor` |
+| Hook stört Claude Code | Exit 0, keine Ausgabe, 3-s-Deadline, TTY-Abbruch | — |
 | Unerwartete Kosten | Token-Schätzung im Manifest, Kostenhinweis, kein Auto-Retry über 1 SDK-Retry hinaus | Schätzung ±30 % |
 | Update-Risiken | Abhängigkeiten gepinnt über `package-lock.json` | Kein Auto-Update implementiert |
 
 ## Offene Punkte
 
-Siehe `PROJECT.md` → „Offen“. Insbesondere: Bestätigungs-Token zwischen preview und run im Main-Prozess (Härtung gegen kompromittierten Renderer), Secret-Scanner mit Entropie-Heuristik, signierte Builds.
+Siehe `PROJECT.md` → „Offen“. Insbesondere: nativer Bestätigungsdialog im Main, `senderFrame`-Prüfung in IPC, Electron-Fuses/ASAR-Integrity und signierte Builds (mit Packaging), Secret-Scanner mit Entropie-Heuristik.
 
 ## Melden
 
