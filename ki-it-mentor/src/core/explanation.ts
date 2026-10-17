@@ -93,11 +93,14 @@ export function buildManifest(request: ExplainRequest, provider: ProviderInfo): 
   const blocks: string[] = [];
 
   for (const item of request.context) {
-    const red = redact(item.content);
+    // Bound the input before redaction (cost) with a margin so a secret cut at the edge is still caught.
+    const red = redact(item.content.slice(0, MAX_ITEM_CHARS + 512));
     const text = truncate(red.text, Math.max(0, Math.min(MAX_ITEM_CHARS, budget)));
+    const dropped = Math.max(0, item.content.length - (MAX_ITEM_CHARS + 512));
     budget -= text.length;
     items.push({ id: item.id, source: item.source, label: item.label, chars: text.length, redactions: red.findings });
-    blocks.push(`<kontext quelle="${SOURCE_LABELS[item.source]}" label="${escapeAttr(item.label)}">\n${text}\n</kontext>`);
+    const body = dropped && !text.includes('[gekürzt') ? `${text}\n… [gekürzt: ${dropped} Zeichen nicht gesendet]` : text;
+    blocks.push(`<kontext quelle="${SOURCE_LABELS[item.source]}" label="${escapeAttr(item.label)}">\n${body}\n</kontext>`);
   }
 
   const question = redact(request.question.trim() || ACTION_LABELS[request.action]);

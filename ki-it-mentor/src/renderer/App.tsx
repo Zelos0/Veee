@@ -5,7 +5,7 @@ import type { Topic } from '../core/curriculum';
 import { ACTION_LABELS } from '../core/explanation';
 import type { ContextItem, Depth, Mode, ProviderInfo } from '../core/types';
 import { LearnPanel } from './components/LearnPanel';
-import { MentorPanel, type AskIntent } from './components/MentorPanel';
+import { MentorPanel, answerKeyOf, type AskIntent } from './components/MentorPanel';
 import { NotesPanel } from './components/NotesPanel';
 import { Segmented } from './components/Segmented';
 import { SetupPanel } from './components/SetupPanel';
@@ -28,6 +28,8 @@ export function App() {
   const [message, setMessage] = useState('');
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
   const latest = useRef<MentorState | null>(null);
+  // While wiping, late updates (e.g. an answer arriving) must not schedule a save of old data.
+  const wiping = useRef(false);
   latest.current = state;
 
   // Flush a pending debounced save synchronously when the window goes away.
@@ -71,7 +73,7 @@ export function App() {
 
   const update = useCallback((fn: (s: MentorState) => MentorState) => {
     setState((prev) => {
-      if (!prev) return prev;
+      if (!prev || wiping.current) return prev;
       const next = fn(prev);
       clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
@@ -208,10 +210,14 @@ export function App() {
             intent={intent}
             onAnswered={onAnswered}
             onSaveNote={(a) => {
-              update((s) => addNote(s, { title: a.question || ACTION_LABELS[a.action], body: a.text, sources: a.contextLabels, topicId: activeTopic ?? undefined }));
+              update((s) =>
+                addNote(s, { title: a.question || ACTION_LABELS[a.action], body: a.text, sources: a.contextLabels, topicId: activeTopic ?? undefined, answerKey: answerKeyOf(a) }),
+              );
               announce('Als Notiz gespeichert.');
             }}
             onOpenSetup={() => setTab('setup')}
+            savedKeys={new Set(state.notes.flatMap((n) => (n.answerKey ? [n.answerKey] : [])))}
+            visible={tab === 'mentor'}
             announce={announce}
           />
         </div>
@@ -245,7 +251,9 @@ export function App() {
               // Cancel a pending save first, or it could write the old state back after the wipe.
               clearTimeout(saveTimer.current);
               saveTimer.current = undefined;
+              wiping.current = true;
               const fresh = await window.mentor.wipeAll();
+              wiping.current = false;
               setState(fresh);
               setContext([]);
               announce('Alle lokalen Daten gelöscht.');

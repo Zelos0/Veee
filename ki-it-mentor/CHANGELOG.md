@@ -17,4 +17,4 @@
 Sandbox, contextIsolation, CSP ohne Netz, Navigations-/Webview-/Permission-Sperren, Redaction (Keys, Tokens, Passwörter, E-Mail, IBAN mit Prüfsumme), synchroner Flush beim Schließen.
 
 ### Tests
-61 Unit-Tests (Vitest), 7 E2E-Szenarien (Playwright gegen Electron, Mock der Messages API), 12 Screenshots, Kontrastrechnung aller Text-Tokens, reale Hook-Validierung mit Claude Code 2.1.302.
+66 Unit-Tests (Vitest), 7 E2E-Szenarien (Playwright gegen Electron, Mock der Messages API), 12 Screenshots, Kontrastrechnung aller Text-Tokens, reale Hook-Validierung mit Claude Code 2.1.302 (zwei Läufe), Laufzeit-Schranke der Redaction gegen ReDoS.

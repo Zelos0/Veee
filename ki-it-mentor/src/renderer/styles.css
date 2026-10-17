@@ -164,6 +164,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 }
 .btn:hover:not(:disabled) { background: var(--surface-3); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn[aria-disabled='true'] { cursor: default; color: var(--text-muted); }
 .btn.ghost { background: transparent; border-color: var(--hairline); }
 .btn.primary { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
 .btn.primary:hover:not(:disabled) { background: var(--text-muted); }

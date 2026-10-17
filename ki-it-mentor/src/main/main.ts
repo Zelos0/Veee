@@ -147,8 +147,10 @@ function registerIpc(): void {
   ipcMain.on('state:saveSync', (event, state: unknown) => {
     try {
       backend.saveSync(parseState(state));
-    } finally {
       event.returnValue = true;
+    } catch (error) {
+      console.warn(`[mentor] Speichern beim Schließen fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`);
+      event.returnValue = false;
     }
   });
   ipcMain.handle('state:wipe', async () => {
@@ -200,9 +202,10 @@ function registerIpc(): void {
     if (!stat.isFile()) throw new Error('Nur reguläre Dateien werden unterstützt.');
     // Read at most MAX_FILE_BYTES — never the whole file (multi-GB logs, devices).
     const fd = openSync(path, 'r');
-    const buf = Buffer.alloc(Math.min(stat.size, MAX_FILE_BYTES));
+    let buf = Buffer.alloc(Math.min(stat.size, MAX_FILE_BYTES));
     try {
-      readSync(fd, buf, 0, buf.length, 0);
+      // The file may have shrunk since stat(); keep only what was actually read.
+      buf = buf.subarray(0, readSync(fd, buf, 0, buf.length, 0));
     } finally {
       closeSync(fd);
     }

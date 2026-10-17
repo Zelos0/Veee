@@ -17,7 +17,7 @@
 
 ## Schwärzung
 
-`src/core/redaction.ts`: Private Keys, Anthropic/OpenAI/Stripe/npm/GitLab/GitHub/AWS/Slack/Google-Keys, JWT, Bearer- und Basic-Auth, `curl -u`, Passwörter in URLs, Zuweisungen an `*password*`/`*secret*`/`*token*`/`*api_key*` (gequotet immer; ungequotet nur Buchstaben+Ziffern-Werte, damit Code wie `getPassword(user)` erhalten bleibt), E-Mail (außer `git@`), IBAN mit Prüfsumme. Läuft in `buildManifest` (jeder Provider-Aufruf) und im Claude-Code-Hook vor dem Schreiben. **Grenze:** Musterbasiert — unbekannte Formate (z. B. proprietäre Tokens ohne Präfix, Secrets in Base64) werden nicht erkannt. Deshalb zusätzlich: Manifest mit exaktem Payload vor jedem externen Versand.
+`src/core/redaction.ts`: Private Keys, Anthropic/OpenAI/Stripe/npm/GitLab/GitHub/AWS/Slack/Google-Keys, JWT, Bearer- und Basic-Auth, `curl -u`, Passwörter in URLs, `mysql -p…`/`docker login -p`, Zuweisungen an Namen, die auf `password`/`secret`/`token`/`api_key`/… **enden** (gequotet immer; ungequotet in Konfig-Zeilen und bei SCREAMING_CASE immer, im Code nur Buchstaben+Ziffern-Werte — damit bleiben `getPassword(user)`, `tokenizer = …`, `csrfToken: "{{…}}"` lesbar), E-Mail (außer `git@`), IBAN mit Prüfsumme. Alle Regeln laufen linear (verankert/begrenzt; Testschranke 100 000 Zeichen < 1 s); Eingaben werden vor der Schwärzung begrenzt. Läuft in `buildManifest` (jeder Provider-Aufruf) und im Claude-Code-Hook vor dem Schreiben. **Grenze:** Musterbasiert — unbekannte Formate (z. B. proprietäre Tokens ohne Präfix, Secrets in Base64) werden nicht erkannt. Deshalb zusätzlich: Manifest mit exaktem Payload vor jedem externen Versand.
 
 ## Threat Model (Kurzfassung)
 

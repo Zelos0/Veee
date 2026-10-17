@@ -38,6 +38,10 @@ const FOLLOW_UPS: ActionKind[] = ['example', 'risks', 'quiz', 'line-by-line', 'w
 const LOADING_DELAY_MS = 300;
 const DEPTHS: Depth[] = ['precise', 'simple', 'simplified'];
 
+export function answerKeyOf(a: Pick<Answer, 'key' | 'depth'>): string {
+  return `${a.key}|${a.depth}`;
+}
+
 function threadKey(r: ExplainRequest): string {
   return [r.mode, r.action, r.question.trim(), r.context.map((c) => c.id).join(',')].join('|');
 }
@@ -54,6 +58,10 @@ export function MentorPanel(props: {
   onAnswered: (answer: Answer) => void;
   onSaveNote: (answer: Answer) => void;
   onOpenSetup: () => void;
+  /** answerKeys of existing notes — "Gespeichert ✓" is derived from the store, not local memory. */
+  savedKeys: Set<string>;
+  /** Escape only acts while this panel is the visible tab. */
+  visible: boolean;
   announce: (message: string) => void;
 }) {
   const { mode, depth, provider, context, onContextChange, announce } = props;
@@ -66,13 +74,13 @@ export function MentorPanel(props: {
   const [elapsed, setElapsed] = useState(0);
   const [showPayload, setShowPayload] = useState(false);
   const [showMore, setShowMore] = useState(false);
-  const [saved, setSaved] = useState<Set<string>>(new Set());
   const [retryIn, setRetryIn] = useState(0);
   const [showLoading, setShowLoading] = useState(false);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const questionRef = useRef<HTMLTextAreaElement>(null);
   const answerRef = useRef<HTMLElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
   const areaRef = useRef<HTMLElement>(null);
 
   const totalChars = context.reduce((s, c) => s + c.content.length, 0);
@@ -216,7 +224,7 @@ export function MentorPanel(props: {
 
   useEffect(() => {
     if (phase.kind === 'confirm') requestAnimationFrame(() => confirmRef.current?.focus());
-  }, [phase.kind]);
+  }, [phase.kind, props.visible]);
 
   // Claude Code inbox
   useEffect(() => {
@@ -237,7 +245,7 @@ export function MentorPanel(props: {
   const cancelRef2 = useRef(cancel);
   cancelRef2.current = cancel;
   useEffect(() => {
-    if (phase.kind !== 'confirm' && phase.kind !== 'loading') return;
+    if (!props.visible || (phase.kind !== 'confirm' && phase.kind !== 'loading')) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       e.preventDefault();
@@ -245,7 +253,7 @@ export function MentorPanel(props: {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [phase.kind]);
+  }, [phase.kind, props.visible]);
 
   const addFromEditor = () => {
     if (!editor || !editor.content.trim()) return;
@@ -472,30 +480,34 @@ export function MentorPanel(props: {
                 </li>
               </ul>
             </details>
-            <div className="actions" role="group" aria-label="Folgeaktionen" style={{ marginTop: 'var(--s2)' }}>
-              {saved.has(`${shown.key}|${shown.depth}`) ? (
-                <button type="button" className="btn" disabled>
-                  Gespeichert ✓
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn primary"
-                  onClick={() => {
-                    props.onSaveNote(shown);
-                    setSaved((prev) => new Set(prev).add(`${shown.key}|${shown.depth}`));
-                  }}
-                >
-                  Als Notiz speichern
-                </button>
-              )}
+            <div className="actions" role="group" aria-label="Folgeaktionen" style={{ marginTop: 'var(--s2)' }} ref={actionsRef}>
+              {/* One element for both states (aria-disabled), so focus survives saving. */}
+              <button
+                type="button"
+                className={props.savedKeys.has(answerKeyOf(shown)) ? 'btn' : 'btn primary'}
+                aria-disabled={props.savedKeys.has(answerKeyOf(shown))}
+                onClick={() => {
+                  if (!props.savedKeys.has(answerKeyOf(shown))) props.onSaveNote(shown);
+                }}
+              >
+                {props.savedKeys.has(answerKeyOf(shown)) ? 'Gespeichert ✓' : 'Als Notiz speichern'}
+              </button>
               {(showMore ? FOLLOW_UPS : FOLLOW_UPS.slice(0, 3)).map((a) => (
                 <button key={a} type="button" className="btn ghost" disabled={busy} onClick={() => followUp(a)}>
                   {ACTION_LABELS[a]}
                 </button>
               ))}
               {!showMore && (
-                <button type="button" className="btn ghost" aria-label="Weitere Folgeaktionen" onClick={() => setShowMore(true)}>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  aria-label="Weitere Folgeaktionen"
+                  onClick={() => {
+                    setShowMore(true);
+                    // The button disappears; move focus to the first newly revealed action.
+                    requestAnimationFrame(() => actionsRef.current?.querySelectorAll<HTMLButtonElement>('button')[4]?.focus());
+                  }}
+                >
                   Mehr …
                 </button>
               )}

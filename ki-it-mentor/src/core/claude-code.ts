@@ -33,6 +33,11 @@ function str(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+/** Redact a bounded prefix only (cost), then cap for storage. */
+function safe(text: string): string {
+  return cap(redactText(text.slice(0, MAX_EVENT_CHARS + 512)));
+}
+
 function cap(text: string): string {
   return text.length > MAX_EVENT_CHARS ? `${text.slice(0, MAX_EVENT_CHARS)}\n… [gekürzt]` : text;
 }
@@ -56,21 +61,21 @@ export function summarizeHookInput(input: HookInput, now = new Date()): InboxEve
   if (event === 'UserPromptSubmit') {
     const prompt = str(input.prompt);
     if (!prompt) return null;
-    return { ...base, kind: 'prompt', label: 'Prompt an Claude Code', content: cap(redactText(prompt)) };
+    return { ...base, kind: 'prompt', label: 'Prompt an Claude Code', content: safe(prompt) };
   }
 
   switch (tool) {
     case 'Edit':
-      return { ...base, kind: 'diff', label: `Edit · ${filePath}`, content: cap(redactText(miniDiff(filePath, str(ti.old_string), str(ti.new_string)))) };
+      return { ...base, kind: 'diff', label: `Edit · ${filePath}`, content: safe(miniDiff(filePath, str(ti.old_string), str(ti.new_string))) };
     case 'MultiEdit': {
       const edits = Array.isArray(ti.edits) ? (ti.edits as Array<Record<string, unknown>>) : [];
       const diff = edits.map((e) => miniDiff(filePath, str(e.old_string), str(e.new_string))).join('\n');
-      return { ...base, kind: 'diff', label: `MultiEdit · ${filePath} (${edits.length})`, content: cap(redactText(diff)) };
+      return { ...base, kind: 'diff', label: `MultiEdit · ${filePath} (${edits.length})`, content: safe(diff) };
     }
     case 'Write':
-      return { ...base, kind: 'file', label: `Write · ${filePath}`, content: cap(redactText(str(ti.content))) };
+      return { ...base, kind: 'file', label: `Write · ${filePath}`, content: safe(str(ti.content)) };
     case 'Bash':
-      return { ...base, kind: 'command', label: `Bash · ${redactText(str(ti.description) || str(ti.command).slice(0, 60))}`, content: cap(redactText(str(ti.command))) };
+      return { ...base, kind: 'command', label: `Bash · ${redactText(str(ti.description) || str(ti.command).slice(0, 60))}`, content: safe(str(ti.command)) };
     case 'Read':
       // Only the path — file content stays with Claude Code.
       return { ...base, kind: 'other', label: `Read · ${filePath}`, content: `Claude Code hat die Datei ${filePath} gelesen.` };

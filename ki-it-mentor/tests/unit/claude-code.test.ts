@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, symlinkSync, lstatSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -96,4 +96,26 @@ describe('hook hardening (review round 1)', () => {
     expect(code).toBe(0);
     expect(Date.now() - started).toBeLessThan(6000);
   }, 10_000);
+});
+
+describe('hook install (review round 2)', () => {
+  it('refuses to rewrite a foreign non-array hooks entry', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'settings-'));
+    const path = join(dir, 'settings.json');
+    writeFileSync(path, JSON.stringify({ hooks: { PostToolUse: 'weird' } }));
+    expect(() => installInto(path, 'node /x/claude-code-hook.cjs')).toThrow(/kein Array/);
+    expect(JSON.parse(readFileSync(path, 'utf8')).hooks.PostToolUse).toBe('weird');
+  });
+
+  it('writes through a symlinked settings file instead of replacing the link', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'settings-'));
+    mkdirSync(join(dir, 'dotfiles'));
+    const real = join(dir, 'dotfiles', 'settings.json');
+    writeFileSync(real, '{}');
+    const link = join(dir, 'settings.json');
+    symlinkSync(real, link);
+    installInto(link, 'node /x/claude-code-hook.cjs');
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(readFileSync(real, 'utf8')).toContain('claude-code-hook.cjs');
+  });
 });

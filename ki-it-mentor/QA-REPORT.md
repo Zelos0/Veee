@@ -10,11 +10,12 @@ Status-Legende: **✅ implementiert und getestet** · **🟡 implementiert, nich
 |---|---|---|
 | Typecheck | `npx tsc -p .` | ✅ 0 Fehler |
 | Lint | `npx eslint .` | ✅ 0 Befunde |
-| Unit | `npx vitest run` | ✅ 61/61 |
+| Unit | `npx vitest run` | ✅ 66/66 |
 | Build | `npm run build` | ✅ |
 | E2E | `xvfb-run -a npx playwright test` | ✅ 7/7 |
 | Mutationsprobe Schließen-Flush | Flush deaktiviert → Test rot; wiederhergestellt → grün | ✅ |
-| Reale Claude-Code-Integration | `claude -p … --model claude-haiku-5-5` in Wegwerf-Projekt mit installiertem Hook | ✅ Write-Ereignis in Inbox, `uninstall` → `{}` |
+| Reale Claude-Code-Integration (2 Läufe) | `claude -p … --model claude-haiku-5-5` in Wegwerf-Projekten mit installiertem Hook | ✅ Lauf 1: Write-Ereignis in Inbox, `uninstall` → `{}`. Lauf 2 (nach Härtung): Bash + Write erfasst, `token: abc123…` als `[REDACTED:secret]` gespeichert, Rechte 700/600 |
+| Redaction-Laufzeit | 5 adversariale Eingaben à 100 000 Zeichen | ✅ je < 1 s (vorher bis 232 s laut Review-Messung) |
 | Kontrast | WCAG-Formel über alle Text-Tokens × Flächen beider Themes | ✅ alle ≥ 4,5:1 (nach Korrektur von 3 Tokens) |
 | Visuelle Inspektion | 12 Screenshots angesehen | siehe unten |
 
@@ -68,7 +69,7 @@ Status-Legende: **✅ implementiert und getestet** · **🟡 implementiert, nich
 
 ## Agenten-Reviews
 
-Runde 1: 24 Befunde (5×P1) — siehe `AGENT-ORCHESTRATION.md`. Runde 2: siehe dort.
+Runde 1: 24 Befunde (5×P1). Runde 2: 8 neue Befunde (2×P1) + 2 Reste — alle umgesetzt. Details: `AGENT-ORCHESTRATION.md`.
 
 ## Bekannte Grenzen
 

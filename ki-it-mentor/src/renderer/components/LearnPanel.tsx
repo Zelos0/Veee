@@ -48,7 +48,7 @@ export function LearnPanel(props: {
 
   // Return focus to the row of the topic we came back from.
   useEffect(() => {
-    if (!topicId && returnTo) document.getElementById(`topic-${returnTo}`)?.focus();
+    if (!topicId && returnTo) document.getElementById(`topic-all-${returnTo}`)?.focus();
   }, [topicId, returnTo]);
 
   const due = useMemo(() => TOPICS.filter((t) => isDue(getProgress(props.state, t.id), now)), [props.state]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -79,7 +79,7 @@ export function LearnPanel(props: {
       {due.length > 0 && (
         <section aria-label="Fällige Wiederholungen">
           <h2 className="section-title due">Fällig zur Wiederholung · {due.length}</h2>
-          <TopicList topics={due} state={props.state} onOpen={setTopicId} />
+          <TopicList section="due" topics={due} state={props.state} onOpen={setTopicId} />
         </section>
       )}
       {DOMAINS.map((domain) => {
@@ -88,7 +88,7 @@ export function LearnPanel(props: {
         return (
           <section key={domain} aria-label={domain}>
             <h2 className="section-title">{domain}</h2>
-            <TopicList topics={topics} state={props.state} onOpen={setTopicId} />
+            <TopicList section="all" topics={topics} state={props.state} onOpen={setTopicId} />
           </section>
         );
       })}
@@ -99,7 +99,7 @@ export function LearnPanel(props: {
   );
 }
 
-function TopicList({ topics, state, onOpen }: { topics: Topic[]; state: MentorState; onOpen: (id: string) => void }) {
+function TopicList({ section, topics, state, onOpen }: { section: string; topics: Topic[]; state: MentorState; onOpen: (id: string) => void }) {
   return (
     <ul className="topic-list">
       {topics.map((t) => {
@@ -107,7 +107,7 @@ function TopicList({ topics, state, onOpen }: { topics: Topic[]; state: MentorSt
         const exercises = exercisesFor(t.id).length;
         return (
           <li key={t.id}>
-            <button type="button" id={`topic-${t.id}`} className="topic-row" onClick={() => onOpen(t.id)} aria-label={`${t.title}, Status: ${STATUS_LABELS[p.status]}`}>
+            <button type="button" id={`topic-${section}-${t.id}`} className="topic-row" onClick={() => onOpen(t.id)} aria-label={`${t.title}, Status: ${STATUS_LABELS[p.status]}`}>
               <span>{t.title}</span>
               <span className="st">
                 <Ladder progress={p} />

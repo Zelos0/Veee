@@ -40,7 +40,13 @@ Jeder Gruppenauftrag wurde aus dem aktuellen Stand neu zusammengesetzt, nicht au
 
 ### Runde 2 — Ergebnis
 
-Siehe Abschnitt unten (wird nach Abschluss ergänzt).
+Auftrag: Runde-1-Liste als Checkliste + gezielte Fragen zu Nebenwirkungen der Fixes (Diff 9d45ce4..55eb380). Die Agentin hat eigene Probe-Skripte gemessen, u. a. Laufzeit der Regexe.
+
+- **Verifiziert behoben:** S1, S2 (Einmal-ID, Anbieter-Bindung, Retry/Fallback korrekt), S3 (3,05 s), S6–S12, U1–U12 (bis auf Reste unten).
+- **Neue Befunde:** N1 **P1** ReDoS in der Namensregel (25 000 Zeichen → 232 s; Altlast, durch `token` verbreitert) · N2 **P1** Lücke: ziffernlose Passwörter, `-p`-Flags, gequotetes `curl -u` · N3 P2 Fehlalarme (`tokenizer`, `csrfToken: "{{…}}"`, Prosa „Basic authentication“ …) · N4 P2 „Gespeichert ✓“ nach Löschen veraltet · N5 P3 Fokusverlust bei „Mehr …“/Speichern · N6 P3 Hook-Install (Nicht-Array, Symlink, chmod fremder Ordner) · N7 P3 doppelte IDs · N8 P3 Flush ohne `catch`, Wipe-Race mit spät eintreffender Antwort. Zusätzlich: Esc auf anderem Tab brach unsichtbar einen Lauf ab; S8-Rest (gelesene Bytes).
+- **Umgesetzt (alle):** Zuweisungs-Redaction neu als lineare Ein-Pass-Funktion (Name ≤ 64 Zeichen ohne verschachtelte Quantoren, Namensprüfung „endet auf password/token/…“ im Replacer, Konfig-Zeilen und SCREAMING_CASE ohne Ziffernpflicht, Template-/URL-/Pfad-Werte ausgenommen); E-Mail- und URL-Regel per Lookbehind verankert (die eigentliche quadratische Ursache — von meiner Profilmessung gefunden, nicht vom Review); Eingabe vor Redaction begrenzt; `-p`/`--password`/gequotetes `-u`; Basic nur im `Authorization`-Header; Notizstatus aus dem Store abgeleitet; Fokusführung; Abschnitts-IDs; `catch` + `wiping`-Sperre; Hook: Nicht-Array → Abbruch ohne Änderung, Symlink-treu, Dateimodus erhalten, chmod nur auf selbst angelegtes Verzeichnis; Esc nur bei sichtbarem Tab; `bytesRead`.
+- **Belege:** Unit 61 → 66 (u. a. Laufzeit < 1 s für 5 adversariale 100-k-Eingaben, Fehlalarm-Katalog bleibt unverändert), E2E 7/7, zweiter Realtest mit Claude Code 2.1.302 (Secret im echten Ereignis geschwärzt, Rechte 700/600).
+- **Schleife beendet** (2/2 Runden). Verbleibende Annahmen: Windows-`%VAR%`-Expansion im Hook-Befehl (S11, nicht getestet); Manifest nennt angefragtes Modell, ein Server-Fallback wird erst im Beleg sichtbar (bewusst, ADR-005).
 
 ## Schleifenbegrenzung
 

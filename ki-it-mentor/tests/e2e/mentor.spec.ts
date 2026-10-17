@@ -56,6 +56,9 @@ test('erste Ansicht, Kontext, drei Tiefen, Folgeaktion, Notiz (lokal)', async ()
   await page.getByRole('button', { name: /Notiz löschen/ }).click();
   await page.getByRole('button', { name: 'Wirklich löschen' }).click();
   await expect(page.getByText('Noch keine Notizen')).toBeVisible();
+  // "Gespeichert ✓" is derived from the store: deleting the note re-enables saving.
+  await page.getByRole('tab', { name: 'Fragen' }).click();
+  await expect(page.getByRole('button', { name: 'Als Notiz speichern' })).toBeVisible();
   await app.close();
 });
 
@@ -179,7 +182,8 @@ test('Notiz überlebt sofortiges Schließen (Debounce wird beim Beenden geschrie
   await addTextContext(first.page, 'a.js', 'const a = 1;');
   await first.page.getByRole('button', { name: 'Erklären' }).click();
   await first.page.getByRole('button', { name: 'Als Notiz speichern' }).click();
-  await expect(first.page.getByRole('button', { name: 'Gespeichert ✓' })).toBeDisabled();
+  await expect(first.page.getByRole('button', { name: 'Gespeichert ✓' })).toHaveAttribute('aria-disabled', 'true');
+  await expect(first.page.getByRole('button', { name: 'Gespeichert ✓' })).toBeFocused();
   await first.app.close(); // well inside the 250 ms debounce
   const second = await launch({ dataDir: first.dataDir });
   await second.page.getByRole('tab', { name: /Notizen/ }).click();

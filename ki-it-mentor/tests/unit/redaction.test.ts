@@ -63,6 +63,44 @@ describe('redact', () => {
     expect(redact(code).text).toBe(code);
   });
 
+  it('round 2: config-style secrets without digits and CLI password flags', () => {
+    const cases: Array<[string, string]> = [
+      ['DB_PASSWORD=correcthorsebatterystaple', 'correcthorse'],
+      ['password: correcthorse', 'correcthorse'],
+      ['export API_TOKEN=abcdefghij', 'abcdefghij'],
+      ['docker login -u me -p hunter2pass registry', 'hunter2pass'],
+      ['mysql -uroot -pS3cret db', 'S3cret'],
+      ['curl -u "admin:my pass" https://x', 'my pass'],
+    ];
+    for (const [input, secret] of cases) expect(redact(input).text, input).not.toContain(secret);
+  });
+
+  it('round 2: no false positives on names that only contain a secret word', () => {
+    const code = [
+      'tokenizer = "cl100k_base"',
+      'tokenType: "Bearer"',
+      'csrfToken: "{{ csrf_token }}"',
+      'passwordLabel = "Passwort eingeben"',
+      'TOKEN_URL="https://example.org/token"',
+      'secretName: "prod-db-credentials"',
+      'pwd = /home/user1/project',
+      'This API uses Basic authentication with every request.',
+      'const password = userInput;',
+      'psql -h db -p 5432 app',
+      'password: string;',
+    ].join('\n');
+    expect(redact(code).text).toBe(code);
+  });
+
+  it('round 2: stays fast on adversarial input (no catastrophic backtracking)', () => {
+    const inputs = ['a-token-'.repeat(12_500), 'ab-cd-ef-gh-'.repeat(8_000), 'x'.repeat(100_000), 'password'.repeat(12_500), 'a_b-'.repeat(25_000)];
+    for (const input of inputs) {
+      const t = performance.now();
+      redact(input);
+      expect(performance.now() - t, input.slice(0, 12)).toBeLessThan(1_000);
+    }
+  });
+
   it('redacts a valid IBAN', () => {
     expect(redact('IBAN DE89 3704 0044 0532 0130 00').text).toBe('IBAN [REDACTED:iban]');
   });

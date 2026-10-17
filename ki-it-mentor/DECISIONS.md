@@ -52,6 +52,13 @@ Format: Kontext · Entscheidung · Alternativen · Begründung · Konsequenzen �
 - **Befund (E2E):** Unter Linux/Xvfb reicht `nativeTheme.themeSource` die Präferenz nicht an `prefers-color-scheme` durch.
 - **Entscheidung:** `settings.theme` = System/Hell/Dunkel, in `App.tsx` zu `data-theme` aufgelöst (mit Listener auf Systemwechsel).
 
+## ADR-009 — Redaction linear und namensbasiert (2026-10-17)
+
+- **Quelle:** Reprompt-Runde 2 (N1 ReDoS 232 s, N2 Lücken, N3 Fehlalarme); eigene Profilmessung fand zusätzlich quadratische E-Mail-/URL-Regeln.
+- **Entscheidung:** Zuweisungen in einem einzigen, begrenzten Regex-Pass erkennen und die Bedeutung (Name endet auf Secret-Wort, Werteart, Konfig-Zeile) im Replacer entscheiden; alle übrigen Regeln am Lauf-Anfang verankern bzw. längenbegrenzen; Eingabe vor Redaction kürzen.
+- **Alternative:** Entropie-Scanner (gitleaks-ähnlich) — mehr Treffer, aber neue Abhängigkeit und mehr Fehlalarme; offen für später.
+- **Ergebnis:** Laufzeit < 1 s bei 100 000 adversarialen Zeichen; Positiv- und Negativkatalog in `tests/unit/redaction.test.ts`.
+
 ## Konfliktprotokoll Agentengruppen
 
 Siehe `AGENT-ORCHESTRATION.md` → Reprompt-Runden.

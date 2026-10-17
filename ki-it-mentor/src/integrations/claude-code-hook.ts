@@ -8,7 +8,7 @@
 // Im Hook-Modus endet der Prozess immer mit Exit-Code 0 und ohne stdout-Ausgabe:
 // der Mentor darf Claude Code nie blockieren oder beeinflussen.
 
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { hookSettingsSnippet, summarizeHookInput, type HookInput } from '../core/claude-code';
 import { hookCommandFor, inboxFile } from './inbox-path';
@@ -38,8 +38,8 @@ export function appendEvent(rawStdin: string, env: NodeJS.ProcessEnv = process.e
   const event = summarizeHookInput(input);
   if (!event) return false;
   const file = inboxFile(env);
-  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-  chmodSync(dirname(file), 0o700);
+  // Tighten permissions only on a directory we created — never on a user-chosen KI_MENTOR_INBOX.
+  if (mkdirSync(dirname(file), { recursive: true, mode: 0o700 })) chmodSync(dirname(file), 0o700);
   if (existsSync(file) && statSync(file).size > MAX_INBOX_BYTES) rotate(file);
   appendFileSync(file, `${JSON.stringify(event)}\n`, { mode: 0o600 });
   chmodSync(file, 0o600);
@@ -54,9 +54,12 @@ function hookCommand(): string {
 
 function writeAtomic(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync(tmp, content);
-  renameSync(tmp, path);
+  // Follow symlinks (e.g. dotfile managers) and keep the existing file mode.
+  const target = existsSync(path) ? realpathSync(path) : path;
+  const mode = existsSync(target) ? statSync(target).mode & 0o777 : 0o644;
+  const tmp = `${target}.tmp-${process.pid}`;
+  writeFileSync(tmp, content, { mode });
+  renameSync(tmp, target);
 }
 
 type HookEntry = { matcher?: string; hooks?: Array<{ type: string; command?: string }> };
@@ -68,7 +71,11 @@ export function installInto(settingsPath: string, command = hookCommand()): void
   const snippet = hookSettingsSnippet(command) as { hooks: Record<string, HookEntry[]> };
   settings.hooks = settings.hooks ?? {};
   for (const [event, entries] of Object.entries(snippet.hooks)) {
-    settings.hooks[event] = [...(settings.hooks[event] ?? []), ...entries];
+    const existing = settings.hooks[event];
+    if (existing !== undefined && !Array.isArray(existing)) {
+      throw new Error(`hooks.${event} in ${settingsPath} ist kein Array — bitte manuell prüfen; nichts geändert.`);
+    }
+    settings.hooks[event] = [...(existing ?? []), ...entries];
   }
   writeAtomic(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
 }

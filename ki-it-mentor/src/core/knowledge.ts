@@ -12,6 +12,8 @@ export interface Note {
   topicId?: string;
   /** Which context sources the note was derived from (labels only, no content). */
   sources: string[];
+  /** Identifies the answer a note was saved from, so the UI can show "saved" truthfully. */
+  answerKey?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -72,7 +74,7 @@ export function parseState(raw: unknown): MentorState {
   };
 }
 
-export function addNote(state: MentorState, input: { title: string; body: string; topicId?: string; sources?: string[] }): MentorState {
+export function addNote(state: MentorState, input: { title: string; body: string; topicId?: string; sources?: string[]; answerKey?: string }): MentorState {
   const now = new Date().toISOString();
   const note: Note = {
     id: newId('note'),
@@ -80,6 +82,7 @@ export function addNote(state: MentorState, input: { title: string; body: string
     body: input.body,
     topicId: input.topicId,
     sources: input.sources ?? [],
+    answerKey: input.answerKey,
     createdAt: now,
     updatedAt: now,
   };
