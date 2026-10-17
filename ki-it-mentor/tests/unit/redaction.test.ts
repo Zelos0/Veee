@@ -33,6 +33,40 @@ describe('redact', () => {
     expect(res.total).toBe(0);
   });
 
+  it('catches secrets found missing in review round 1', () => {
+    const cases = [
+      'stripe sk_live_51HxAbCdEfGhIjKlMnOp',
+      'NPM_TOKEN=npm_abcdefghijklmnopqrstuvwxyz0123456789',
+      'gitlab glpat-abcdefghij0123456789xy',
+      'Authorization: Basic YWRtaW46c3VwZXJzZWNyZXQ=',
+      'curl -u admin:s3cretpass https://x',
+      'TOKEN=3f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c',
+      'password: "my secret pass"',
+    ];
+    for (const c of cases) {
+      const res = redact(c);
+      expect(res.total, c).toBeGreaterThan(0);
+      expect(res.text).not.toMatch(/51HxAbCd|npm_abc|glpat-abc|YWRtaW46|s3cretpass|3f9a8b7c|my secret pass/);
+    }
+  });
+
+  it('keeps ordinary code that merely mentions secrets', () => {
+    const code = [
+      'const password = getPassword(user);',
+      'secretKey: string;',
+      'const password_hash = bcrypt(pw);',
+      'const apiKey = process.env.API_KEY;',
+      'maxTokens: 16000,',
+      'git clone git@github.com:org/repo.git',
+      'const id = "AB12CDEF1234GHIJ5678";',
+    ].join('\n');
+    expect(redact(code).text).toBe(code);
+  });
+
+  it('redacts a valid IBAN', () => {
+    expect(redact('IBAN DE89 3704 0044 0532 0130 00').text).toBe('IBAN [REDACTED:iban]');
+  });
+
   it('is idempotent', () => {
     const once = redact('api_key = "abcd1234efgh"').text;
     expect(redact(once).text).toBe(once);

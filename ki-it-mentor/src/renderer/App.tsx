@@ -12,7 +12,7 @@ import { SetupPanel } from './components/SetupPanel';
 
 type Tab = 'mentor' | 'learn' | 'notes' | 'setup';
 const TABS: Array<{ id: Tab; label: string }> = [
-  { id: 'mentor', label: 'Mentor' },
+  { id: 'mentor', label: 'Fragen' },
   { id: 'learn', label: 'Lernpfad' },
   { id: 'notes', label: 'Notizen' },
   { id: 'setup', label: 'Setup' },
@@ -27,6 +27,24 @@ export function App() {
   const [activeTopic, setActiveTopic] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const latest = useRef<MentorState | null>(null);
+  latest.current = state;
+
+  // Flush a pending debounced save synchronously when the window goes away.
+  useEffect(() => {
+    const flush = () => {
+      if (saveTimer.current === undefined || !latest.current) return;
+      clearTimeout(saveTimer.current);
+      saveTimer.current = undefined;
+      window.mentor.saveStateSync(latest.current);
+    };
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('beforeunload', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      window.removeEventListener('beforeunload', flush);
+    };
+  }, []);
 
   useEffect(() => {
     void Promise.all([window.mentor.getState(), window.mentor.listProviders()]).then(([s, p]) => {
@@ -56,7 +74,10 @@ export function App() {
       if (!prev) return prev;
       const next = fn(prev);
       clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => void window.mentor.saveState(next), 250);
+      saveTimer.current = setTimeout(() => {
+        saveTimer.current = undefined;
+        void window.mentor.saveState(next);
+      }, 250);
       return next;
     });
   }, []);
@@ -157,7 +178,7 @@ export function App() {
             role="tab"
             id={`tab-${t.id}`}
             aria-selected={tab === t.id}
-            aria-controls={`panel-${t.id}`}
+            aria-controls={tab === t.id ? `panel-${t.id}` : undefined}
             tabIndex={tab === t.id ? 0 : -1}
             onClick={() => setTab(t.id)}
             onKeyDown={(e) => {
@@ -190,10 +211,12 @@ export function App() {
               update((s) => addNote(s, { title: a.question || ACTION_LABELS[a.action], body: a.text, sources: a.contextLabels, topicId: activeTopic ?? undefined }));
               announce('Als Notiz gespeichert.');
             }}
+            onOpenSetup={() => setTab('setup')}
             announce={announce}
           />
         </div>
-        {tab === 'learn' && (
+        {/* Kept mounted so an exercise in progress survives tab switches. */}
+        <div hidden={tab !== 'learn'}>
           <LearnPanel
             state={state}
             onProgress={(p: TopicProgress) => update((s) => setProgress(s, p))}
@@ -209,7 +232,7 @@ export function App() {
             }}
             announce={announce}
           />
-        )}
+        </div>
         {tab === 'notes' && (
           <NotesPanel state={state} onDelete={(id) => update((s) => deleteNote(s, id))} onDeleteAll={() => update(deleteAllNotes)} announce={announce} />
         )}
@@ -219,8 +242,10 @@ export function App() {
             providers={providers}
             onSettings={patchSettings}
             onWipe={async () => {
-              const fresh = await window.mentor.wipeAll();
+              // Cancel a pending save first, or it could write the old state back after the wipe.
               clearTimeout(saveTimer.current);
+              saveTimer.current = undefined;
+              const fresh = await window.mentor.wipeAll();
               setState(fresh);
               setContext([]);
               announce('Alle lokalen Daten gelöscht.');

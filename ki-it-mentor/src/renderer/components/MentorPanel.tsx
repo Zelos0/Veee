@@ -25,7 +25,7 @@ type Phase =
   | { kind: 'idle' }
   | { kind: 'confirm'; manifest: SendManifest; request: ExplainRequest }
   | { kind: 'loading'; runId: string; startedAt: number; request: ExplainRequest; external: boolean }
-  | { kind: 'error'; message: string; request: ExplainRequest; retryAfterSec?: number };
+  | { kind: 'error'; code: string; message: string; request: ExplainRequest; retryAfterSec?: number };
 
 export interface AskIntent {
   question: string;
@@ -33,7 +33,9 @@ export interface AskIntent {
   nonce: number;
 }
 
-const FOLLOW_UPS: ActionKind[] = ['example', 'line-by-line', 'why', 'alternatives', 'risks', 'quiz'];
+// The first three are shown; the rest sit behind "Mehr …" to keep the answer calm.
+const FOLLOW_UPS: ActionKind[] = ['example', 'risks', 'quiz', 'line-by-line', 'why', 'alternatives'];
+const LOADING_DELAY_MS = 300;
 const DEPTHS: Depth[] = ['precise', 'simple', 'simplified'];
 
 function threadKey(r: ExplainRequest): string {
@@ -51,6 +53,7 @@ export function MentorPanel(props: {
   intent: AskIntent | null;
   onAnswered: (answer: Answer) => void;
   onSaveNote: (answer: Answer) => void;
+  onOpenSetup: () => void;
   announce: (message: string) => void;
 }) {
   const { mode, depth, provider, context, onContextChange, announce } = props;
@@ -62,26 +65,33 @@ export function MentorPanel(props: {
   const [inbox, setInbox] = useState<InboxEvent[] | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [showPayload, setShowPayload] = useState(false);
+  const [showMore, setShowMore] = useState(false);
+  const [saved, setSaved] = useState<Set<string>>(new Set());
+  const [retryIn, setRetryIn] = useState(0);
+  const [showLoading, setShowLoading] = useState(false);
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
   const questionRef = useRef<HTMLTextAreaElement>(null);
+  const answerRef = useRef<HTMLElement>(null);
+  const areaRef = useRef<HTMLElement>(null);
 
   const totalChars = context.reduce((s, c) => s + c.content.length, 0);
 
   // ---- running a request
   const run = useCallback(
-    async (request: ExplainRequest) => {
+    async (request: ExplainRequest, manifestId?: string) => {
       if (!provider) return;
-      const runId = `run_${Date.now().toString(36)}`;
+      const runId = crypto.randomUUID();
       setPhase({ kind: 'loading', runId, startedAt: Date.now(), request, external: provider.kind === 'external' });
       announce('Anfrage läuft …');
-      const res = await window.mentor.run(runId, provider.id, request);
+      const res = await window.mentor.run(runId, provider.id, request, manifestId);
       if (!res.ok) {
         if (res.code === 'cancelled') {
           setPhase({ kind: 'idle' });
           announce('Abgebrochen.');
           return;
         }
-        setPhase({ kind: 'error', message: res.message, request, retryAfterSec: res.retryAfterSec });
+        setPhase({ kind: 'error', code: res.code, message: res.message, request, retryAfterSec: res.retryAfterSec });
         announce(`Fehler: ${res.message}`);
         return;
       }
@@ -101,8 +111,13 @@ export function MentorPanel(props: {
       setAnswers((prev) => ({ ...prev, [key]: { ...prev[key], [request.depth]: answer } }));
       setCurrent({ key, request });
       setPhase({ kind: 'idle' });
+      setShowMore(false);
       announce(`Antwort bereit (${DEPTH_LABELS[request.depth].label}).`);
       props.onAnswered(answer);
+      requestAnimationFrame(() => {
+        if (areaRef.current) areaRef.current.scrollTop = 0;
+        answerRef.current?.focus();
+      });
     },
     [provider, announce, props],
   );
@@ -110,7 +125,7 @@ export function MentorPanel(props: {
   const ask = useCallback(
     async (request: ExplainRequest) => {
       if (!provider || !provider.configured) {
-        setPhase({ kind: 'error', message: provider?.unavailableReason ?? 'Kein Anbieter gewählt.', request });
+        setPhase({ kind: 'error', code: 'not_configured', message: provider?.unavailableReason ?? 'Kein Anbieter gewählt.', request });
         return;
       }
       const cached = answers[threadKey(request)]?.[request.depth];
@@ -169,10 +184,33 @@ export function MentorPanel(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.intent?.nonce]);
 
+  // Elapsed counter; the loading box only appears after LOADING_DELAY_MS so fast local runs don't flash.
   useEffect(() => {
+    setShowLoading(false);
     if (phase.kind !== 'loading') return;
-    const t = setInterval(() => setElapsed(Math.floor((Date.now() - phase.startedAt) / 1000)), 250);
     setElapsed(0);
+    const t = setInterval(() => setElapsed(Date.now() - phase.startedAt), 250);
+    const f = setTimeout(() => setShowLoading(true), LOADING_DELAY_MS);
+    return () => {
+      clearInterval(t);
+      clearTimeout(f);
+    };
+  }, [phase]);
+
+  // Keyboard users land on "Abbrechen" once the loading box is visible.
+  useEffect(() => {
+    if (showLoading) cancelRef.current?.focus();
+  }, [showLoading]);
+
+  // Rate-limit countdown: "Erneut senden" stays disabled until retry-after has passed.
+  useEffect(() => {
+    if (phase.kind !== 'error' || !phase.retryAfterSec) {
+      setRetryIn(0);
+      return;
+    }
+    const until = Date.now() + phase.retryAfterSec * 1000;
+    setRetryIn(phase.retryAfterSec);
+    const t = setInterval(() => setRetryIn(Math.max(0, Math.ceil((until - Date.now()) / 1000))), 250);
     return () => clearInterval(t);
   }, [phase]);
 
@@ -191,16 +229,23 @@ export function MentorPanel(props: {
     if (phase.kind === 'confirm') {
       setPhase({ kind: 'idle' });
       announce('Nichts gesendet.');
-      questionRef.current?.focus();
+      requestAnimationFrame(() => questionRef.current?.focus());
     }
   };
 
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape' && (phase.kind === 'confirm' || phase.kind === 'loading')) {
+  // Window-level Escape: while sending, focus may sit on body (disabled textarea, removed manifest).
+  const cancelRef2 = useRef(cancel);
+  cancelRef2.current = cancel;
+  useEffect(() => {
+    if (phase.kind !== 'confirm' && phase.kind !== 'loading') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
       e.preventDefault();
-      cancel();
-    }
-  };
+      cancelRef2.current();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [phase.kind]);
 
   const addFromEditor = () => {
     if (!editor || !editor.content.trim()) return;
@@ -222,15 +267,18 @@ export function MentorPanel(props: {
 
   const shown = current ? answers[current.key]?.[current.request.depth] : undefined;
   const busy = phase.kind === 'loading' || phase.kind === 'confirm';
+  const empty = !question.trim() && !context.length;
+  const stale = Boolean(shown && shown.depth !== depth);
 
   return (
-    <div className="mentor" onKeyDown={onKeyDown}>
+    <div className="mentor">
       {/* ---------------- context bar */}
       <section className="context-bar" aria-label="Kontext">
         <div className="context-head">
           <span>Kontext</span>
-          <span className="meter mono" title="Zeichen im Kontext (vor Kürzung)">
-            {context.length} Quelle{context.length === 1 ? '' : 'n'} · {totalChars.toLocaleString('de-DE')} / {MAX_TOTAL_CHARS.toLocaleString('de-DE')} Z.
+          <span className="meter mono">
+            {context.length} Quelle{context.length === 1 ? '' : 'n'} · {totalChars.toLocaleString('de-DE')} / {MAX_TOTAL_CHARS.toLocaleString('de-DE')}{' '}
+            <abbr title="Zeichen (maximal so viele werden gesendet)">Z.</abbr>
           </span>
         </div>
         {context.length > 0 ? (
@@ -263,6 +311,16 @@ export function MentorPanel(props: {
               className="code"
               rows={6}
               autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                  e.preventDefault();
+                  addFromEditor();
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setEditor(null);
+                }
+              }}
               aria-label={editor.source === 'diff' ? 'Diff einfügen' : 'Text oder Code einfügen'}
               placeholder={editor.source === 'diff' ? 'git diff einfügen …' : 'Code, Log oder Text einfügen …'}
               value={editor.content}
@@ -270,7 +328,7 @@ export function MentorPanel(props: {
             />
             <div className="row">
               <button type="button" className="btn primary" onClick={addFromEditor} disabled={!editor.content.trim()}>
-                Hinzufügen
+                Hinzufügen <kbd>Strg+Enter</kbd>
               </button>
               <button type="button" className="btn ghost" onClick={() => setEditor(null)}>
                 Abbrechen
@@ -331,7 +389,7 @@ export function MentorPanel(props: {
       </section>
 
       {/* ---------------- answer */}
-      <section className="answer-area" aria-label="Antwort">
+      <section className="answer-area" aria-label="Antwort" ref={areaRef}>
         <div className="depth-row">
           <Segmented<Depth>
             label="Erklärtiefe"
@@ -343,16 +401,18 @@ export function MentorPanel(props: {
           <span className="hint">{DEPTH_LABELS[depth].hint}</span>
         </div>
 
-        {phase.kind === 'loading' && (
-          <div className="state-box loading" role="status">
+        {phase.kind === 'loading' && showLoading && (
+          <div className="state-box loading">
             <div className="row">
               <span>
                 {phase.external ? 'Wird an ' : 'Lokal: '}
                 <strong>{provider?.label}</strong> {phase.external ? 'gesendet …' : 'wird erstellt …'}
               </span>
               <span className="spacer" />
-              <span className="mono faint">{elapsed} s</span>
-              <button type="button" className="btn ghost" onClick={cancel}>
+              <span className="mono faint" aria-hidden="true">
+                {Math.floor(elapsed / 1000)} s
+              </span>
+              <button ref={cancelRef} type="button" className="btn ghost" onClick={cancel}>
                 Abbrechen <kbd>Esc</kbd>
               </button>
             </div>
@@ -364,9 +424,21 @@ export function MentorPanel(props: {
           <div className="state-box error" role="alert">
             <span>{phase.message}</span>
             <div className="row">
-              <button type="button" className="btn" onClick={() => void ask(phase.request)} disabled={!provider?.configured}>
-                Erneut senden
-              </button>
+              {phase.code === 'not_configured' ? (
+                <button type="button" className="btn" onClick={props.onOpenSetup}>
+                  Setup öffnen <kbd>Alt+4</kbd>
+                </button>
+              ) : (
+                <button type="button" className="btn" onClick={() => void ask(phase.request)} disabled={!provider?.configured || retryIn > 0}>
+                  {retryIn > 0 ? (
+                    <>
+                      Erneut senden in <span className="mono">{retryIn} s</span>
+                    </>
+                  ) : (
+                    'Erneut senden'
+                  )}
+                </button>
+              )}
               <button type="button" className="btn ghost" onClick={() => setPhase({ kind: 'idle' })}>
                 Schließen
               </button>
@@ -375,9 +447,15 @@ export function MentorPanel(props: {
         )}
 
         {shown ? (
-          <article className="answer" aria-label={`Antwort, ${DEPTH_LABELS[shown.depth].label}`} key={`${shown.key}-${shown.depth}`}>
+          <article
+            className={`answer${stale ? ' stale' : ''}`}
+            aria-label={`Antwort, ${DEPTH_LABELS[shown.depth].label}`}
+            key={`${shown.key}-${shown.depth}`}
+            ref={answerRef}
+            tabIndex={-1}
+          >
             <p className="faint mono" style={{ fontSize: 'var(--fs-xs)', margin: '0 0 var(--s2)' }}>
-              {ACTION_LABELS[shown.action]} · {DEPTH_LABELS[shown.depth].label} · {mode === 'learn' ? 'Lernmentor' : 'Copilot'}
+              {ACTION_LABELS[shown.action]} · {stale ? `zeigt noch: ${DEPTH_LABELS[shown.depth].label}` : DEPTH_LABELS[shown.depth].label} · {mode === 'learn' ? 'Lernmentor' : 'Copilot'}
             </p>
             <Markdown text={shown.text} />
             <details className="receipt">
@@ -395,14 +473,32 @@ export function MentorPanel(props: {
               </ul>
             </details>
             <div className="actions" role="group" aria-label="Folgeaktionen" style={{ marginTop: 'var(--s2)' }}>
-              {FOLLOW_UPS.map((a) => (
+              {saved.has(`${shown.key}|${shown.depth}`) ? (
+                <button type="button" className="btn" disabled>
+                  Gespeichert ✓
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn primary"
+                  onClick={() => {
+                    props.onSaveNote(shown);
+                    setSaved((prev) => new Set(prev).add(`${shown.key}|${shown.depth}`));
+                  }}
+                >
+                  Als Notiz speichern
+                </button>
+              )}
+              {(showMore ? FOLLOW_UPS : FOLLOW_UPS.slice(0, 3)).map((a) => (
                 <button key={a} type="button" className="btn ghost" disabled={busy} onClick={() => followUp(a)}>
                   {ACTION_LABELS[a]}
                 </button>
               ))}
-              <button type="button" className="btn" onClick={() => props.onSaveNote(shown)}>
-                Als Notiz speichern
-              </button>
+              {!showMore && (
+                <button type="button" className="btn ghost" aria-label="Weitere Folgeaktionen" onClick={() => setShowMore(true)}>
+                  Mehr …
+                </button>
+              )}
             </div>
           </article>
         ) : (
@@ -442,13 +538,20 @@ export function MentorPanel(props: {
                             </div>
                           )}
                         </td>
-                        <td className="num mono">{it.chars.toLocaleString('de-DE')} Z.</td>
+                        <td className="num mono">
+                        {it.chars.toLocaleString('de-DE')} <abbr title="Zeichen">Z.</abbr>
+                      </td>
                       </tr>
                     ))}
                     <tr style={{ animationDelay: `calc(var(--stagger) * ${phase.manifest.items.length})` }}>
                       <td className="src">Frage</td>
-                      <td>+ Systemanweisung (Modus, Tiefe, Aufgabe)</td>
-                      <td className="num mono">{phase.manifest.questionChars.toLocaleString('de-DE')} Z.</td>
+                      <td>
+                        {phase.request.question ? <q>{phase.request.question.length > 90 ? `${phase.request.question.slice(0, 90)}…` : phase.request.question}</q> : ACTION_LABELS[phase.request.action]}
+                        <div className="faint" style={{ fontSize: 'var(--fs-xs)' }}>+ Systemanweisung (Modus, Tiefe, Aufgabe)</div>
+                      </td>
+                      <td className="num mono">
+                        {phase.manifest.questionChars.toLocaleString('de-DE')} <abbr title="Zeichen">Z.</abbr>
+                      </td>
                     </tr>
                   </tbody>
                   <tfoot>
@@ -457,7 +560,9 @@ export function MentorPanel(props: {
                       <td>
                         {phase.manifest.providerLabel} · <span className="mono">{phase.manifest.model}</span>
                       </td>
-                      <td className="num mono">≈ {phase.manifest.estimatedTokens.toLocaleString('de-DE')} Tok.</td>
+                      <td className="num mono">
+                        ≈ {phase.manifest.estimatedTokens.toLocaleString('de-DE')} <abbr title="Tokens, geschätzt (Zeichen ÷ 4)">Tok.</abbr>
+                      </td>
                     </tr>
                   </tfoot>
                 </table>
@@ -470,7 +575,7 @@ export function MentorPanel(props: {
                 </button>
                 {showPayload && <pre aria-label="Exakter Payload">{`[system]\n${phase.manifest.payload.system}\n\n[user]\n${phase.manifest.payload.messages[0]?.content ?? ''}`}</pre>}
                 <div className="row">
-                  <button ref={confirmRef} type="button" className="btn signal" onClick={() => void run(phase.request)}>
+                  <button ref={confirmRef} type="button" className="btn signal" onClick={() => void run(phase.request, phase.manifest.manifestId)}>
                     Senden <kbd>Enter</kbd>
                   </button>
                   <button type="button" className="btn ghost" onClick={cancel}>
@@ -497,7 +602,13 @@ export function MentorPanel(props: {
               }
             }}
           />
+          {empty && (
+            <p className="faint" style={{ margin: 0, fontSize: 'var(--fs-xs)' }} id="composer-hint">
+              Frage eingeben oder oben Kontext hinzufügen.
+            </p>
+          )}
           <div className="composer-row">
+            {mode === 'learn' && <span className="mode-tag">LERNMODUS</span>}
             {provider && (
               <span className={`dest ${provider.kind}`} title={provider.kind === 'external' ? 'Sendet nach Bestätigung an einen externen Dienst' : 'Bleibt auf diesem Rechner'}>
                 <span className="tag">{provider.kind === 'external' ? 'EXTERN' : 'LOKAL'}</span>
@@ -506,7 +617,7 @@ export function MentorPanel(props: {
               </span>
             )}
             <span className="spacer" />
-            <button type="button" className="btn primary" onClick={() => submit()} disabled={busy}>
+            <button type="button" className="btn primary" onClick={() => submit()} disabled={busy || empty} aria-describedby={empty ? 'composer-hint' : undefined}>
               {question.trim() ? 'Fragen' : 'Erklären'}
             </button>
           </div>

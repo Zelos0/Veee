@@ -1,9 +1,10 @@
 // Electron main process: Overlay-Fenster, Berechtigungsgrenze, Provider-Aufrufe,
 // Dateizugriff nur über Dialoge, lokale Persistenz.
 
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen, shell } from 'electron';
-import { existsSync, readFileSync, statSync, unwatchFile, watchFile, writeFileSync, rmSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen, session, shell } from 'electron';
+import { randomUUID } from 'node:crypto';
+import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync, unwatchFile, watchFile, writeFileSync, rmSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { parseInbox } from '../core/claude-code';
 import { buildManifest } from '../core/explanation';
 import { exportJson, exportMarkdown, parseState, emptyState, type MentorState } from '../core/knowledge';
@@ -12,8 +13,8 @@ import { DemoProvider } from '../core/providers/demo';
 import { OllamaProvider } from '../core/providers/ollama';
 import { completeWithTimeout, describeError, toProviderError, type Provider } from '../core/providers/provider';
 import { redactText } from '../core/redaction';
-import type { ExplainRequest } from '../core/types';
-import { inboxFile } from '../integrations/inbox-path';
+import type { ExplainRequest, SendManifest } from '../core/types';
+import { hookCommandFor, inboxFile } from '../integrations/inbox-path';
 import type { AppInfo, RunResult } from '../shared/ipc';
 import { FileBackend } from './file-backend';
 
@@ -39,6 +40,20 @@ function registerProviders(): void {
 let backend: FileBackend;
 let win: BrowserWindow | null = null;
 const running = new Map<string, AbortController>();
+
+// Confirmed-send ledger: preview() parks the exact payload here; an external run()
+// must present its id. Single use, 5 min TTL — the renderer cannot swap content
+// between showing the manifest and sending it.
+const MANIFEST_TTL_MS = 5 * 60_000;
+const pending = new Map<string, { manifest: SendManifest; expires: number }>();
+
+function takeManifest(id: string | undefined, providerId: string): SendManifest | null {
+  if (!id) return null;
+  const entry = pending.get(id);
+  pending.delete(id);
+  if (!entry || entry.expires < Date.now() || entry.manifest.providerId !== providerId) return null;
+  return entry.manifest;
+}
 
 // ---------------------------------------------------------------- window
 
@@ -129,6 +144,13 @@ function provider(id: string): Provider {
 function registerIpc(): void {
   ipcMain.handle('state:get', async () => parseState(await backend.load()));
   ipcMain.handle('state:save', async (_e, state: unknown) => backend.save(parseState(state)));
+  ipcMain.on('state:saveSync', (event, state: unknown) => {
+    try {
+      backend.saveSync(parseState(state));
+    } finally {
+      event.returnValue = true;
+    }
+  });
   ipcMain.handle('state:wipe', async () => {
     await backend.wipe();
     rmSync(windowStateFile(), { force: true });
@@ -137,13 +159,21 @@ function registerIpc(): void {
 
   ipcMain.handle('providers:list', () => [...providers.values()].map((p) => p.info()));
 
-  ipcMain.handle('explain:preview', (_e, providerId: string, request: ExplainRequest) => buildManifest(request, provider(providerId).info()));
+  ipcMain.handle('explain:preview', (_e, providerId: string, request: ExplainRequest) => {
+    const manifest: SendManifest = { ...buildManifest(request, provider(providerId).info()), manifestId: randomUUID() };
+    for (const [id, entry] of pending) if (entry.expires < Date.now()) pending.delete(id);
+    pending.set(manifest.manifestId!, { manifest, expires: Date.now() + MANIFEST_TTL_MS });
+    return manifest;
+  });
 
-  ipcMain.handle('explain:run', async (_e, runId: string, providerId: string, request: ExplainRequest): Promise<RunResult> => {
+  ipcMain.handle('explain:run', async (_e, runId: string, providerId: string, request: ExplainRequest, manifestId?: string): Promise<RunResult> => {
     const p = provider(providerId);
     const info = p.info();
-    // Rebuilt here (not taken from the renderer) so exactly the previewed, redacted payload is sent.
-    const manifest = buildManifest(request, info);
+    // External: send exactly the payload that was shown and confirmed. Local: build (and redact) here.
+    const manifest = info.kind === 'external' ? takeManifest(manifestId, providerId) : buildManifest(request, info);
+    if (!manifest) {
+      return { ok: false, code: 'bad_request', message: 'Versand nicht bestätigt oder Bestätigung abgelaufen. Bitte erneut senden und das Manifest bestätigen.' };
+    }
     const controller = new AbortController();
     running.set(runId, controller);
     try {
@@ -166,11 +196,18 @@ function registerIpc(): void {
     const result = await dialog.showOpenDialog(win, { title: 'Datei als Kontext wählen (nur lesen)', properties: ['openFile'] });
     const path = result.filePaths[0];
     if (result.canceled || !path) return null;
-    const size = statSync(path).size;
-    const raw = readFileSync(path);
-    if (raw.subarray(0, 8000).includes(0)) throw new Error('Binärdatei — nur Textdateien werden unterstützt.');
-    const truncated = size > MAX_FILE_BYTES;
-    return { label: basename(path), content: raw.subarray(0, MAX_FILE_BYTES).toString('utf8'), truncated };
+    const stat = statSync(path);
+    if (!stat.isFile()) throw new Error('Nur reguläre Dateien werden unterstützt.');
+    // Read at most MAX_FILE_BYTES — never the whole file (multi-GB logs, devices).
+    const fd = openSync(path, 'r');
+    const buf = Buffer.alloc(Math.min(stat.size, MAX_FILE_BYTES));
+    try {
+      readSync(fd, buf, 0, buf.length, 0);
+    } finally {
+      closeSync(fd);
+    }
+    if (buf.subarray(0, 8000).includes(0)) throw new Error('Binärdatei — nur Textdateien werden unterstützt.');
+    return { label: basename(path), content: buf.toString('utf8'), truncated: stat.size > MAX_FILE_BYTES };
   });
 
   ipcMain.handle('notes:export', async (_e, format: 'json' | 'md') => {
@@ -213,14 +250,17 @@ function registerIpc(): void {
     return existsSync(file) ? parseInbox(readFileSync(file, 'utf8')).slice(-50).reverse() : [];
   });
   ipcMain.handle('inbox:clear', () => {
-    rmSync(inboxFile(), { force: true });
-    rmSync(`${inboxFile()}.1`, { force: true });
+    const file = inboxFile();
+    if (!existsSync(dirname(file))) return;
+    for (const name of readdirSync(dirname(file))) {
+      if (name.startsWith(basename(file))) rmSync(join(dirname(file), name), { force: true });
+    }
   });
 
   ipcMain.handle('app:info', (): AppInfo => ({
     dataLocation: backend.location(),
     inboxFile: inboxFile(),
-    hookCommand: `node ${JSON.stringify(join(__dirname, '../claude-code-hook.cjs'))}`,
+    hookCommand: hookCommandFor(join(__dirname, '../claude-code-hook.cjs')),
     platform: process.platform,
     versions: { electron: process.versions.electron ?? '', app: app.getVersion() },
   }));
@@ -228,7 +268,19 @@ function registerIpc(): void {
 
 // ---------------------------------------------------------------- lifecycle
 
+// No web permissions (camera, mic, notifications, …) and no webviews, ever.
+app.on('web-contents-created', (_e, contents) => {
+  contents.on('will-attach-webview', (event) => event.preventDefault());
+  contents.on('will-redirect', (event) => event.preventDefault());
+});
+
+app.on('before-quit', () => {
+  for (const controller of running.values()) controller.abort();
+});
+
 app.whenReady().then(async () => {
+  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+  session.defaultSession.setPermissionCheckHandler(() => false);
   backend = new FileBackend(app.getPath('userData'));
   registerProviders();
   registerIpc();

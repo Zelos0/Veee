@@ -21,11 +21,17 @@ export class OllamaProvider implements Provider {
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
+  /** Only a loopback address keeps data on this machine; anything else is treated as external. */
+  isLoopback(): boolean {
+    return /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(this.baseUrl);
+  }
+
   info(): ProviderInfo {
+    const local = this.isLoopback();
     return {
       id: 'ollama',
-      label: 'Lokales Modell (Ollama)',
-      kind: 'local',
+      label: local ? 'Lokales Modell (Ollama)' : `Ollama (entfernt: ${this.baseUrl})`,
+      kind: local ? 'local' : 'external',
       model: this.model || '—',
       configured: Boolean(this.model),
       unavailableReason: this.model ? undefined : 'Kein Modell gesetzt. Setze KI_MENTOR_OLLAMA_MODEL (z. B. „qwen2.5-coder“) und starte Ollama.',

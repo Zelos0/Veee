@@ -22,8 +22,15 @@ export function Segmented<T extends string>(props: {
   const [indicator, setIndicator] = useState<{ x: number; w: number } | null>(null);
 
   useLayoutEffect(() => {
-    const el = ref.current?.querySelector<HTMLButtonElement>('button[aria-checked="true"]');
-    if (el) setIndicator({ x: el.offsetLeft, w: el.offsetWidth });
+    const measure = () => {
+      const el = ref.current?.querySelector<HTMLButtonElement>('button[aria-checked="true"]');
+      if (el) setIndicator({ x: el.offsetLeft, w: el.offsetWidth });
+    };
+    measure();
+    // Re-measure when fonts load or the window is resized.
+    const observer = new ResizeObserver(measure);
+    if (ref.current) observer.observe(ref.current);
+    return () => observer.disconnect();
   }, [props.value, props.options]);
 
   const onKey = (e: KeyboardEvent) => {

@@ -85,7 +85,8 @@ button, input, textarea, select { font: inherit; color: inherit; }
 
 /* ---------- shell */
 .app { display: grid; grid-template-rows: auto auto 1fr; grid-template-columns: minmax(0, 1fr); height: 100%; }
-.app[data-mode='learn'] .titlebar { box-shadow: inset 0 2px 0 var(--learn); }
+.app[data-mode='learn'] .titlebar { box-shadow: inset 0 3px 0 var(--learn); }
+.mode-tag { font: 600 10px var(--font-mono); padding: 1px 5px; border-radius: 3px; border: 1px solid var(--learn); color: var(--learn); }
 
 .titlebar {
   -webkit-app-region: drag;
@@ -99,7 +100,9 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .brand { font: 600 var(--fs-sm) var(--font-mono); letter-spacing: 0.02em; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* Narrow overlay: the brand collapses to its status dot so controls never overflow. */
 @media (max-width: 400px) { .brand-text { display: none; } }
-.brand-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); margin-right: 6px; vertical-align: 1px; }
+.brand-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); margin-right: 6px; vertical-align: 1px; }
+/* The dot carries the mode: neutral = Copilot, violet = Lernmentor. */
+.app[data-mode='learn'] .brand-dot { background: var(--learn); }
 .titlebar .spacer { flex: 1; }
 
 .icon-btn {
@@ -182,6 +185,10 @@ textarea.code { font: var(--fs-sm) / 1.45 var(--font-mono); }
 .depth-row { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
 .depth-row .hint { font-size: var(--fs-xs); color: var(--text-faint); }
 .answer { animation: fade-in var(--dur-fast) linear; }
+.answer:focus { outline: none; }
+.answer:focus-visible { outline: 2px solid var(--focus); }
+.answer.stale { opacity: 0.55; }
+abbr { text-decoration: none; cursor: help; }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 .md h2 { font-size: var(--fs-md); margin: var(--s4) 0 var(--s1); font-weight: 650; }
@@ -253,9 +260,9 @@ textarea.code { font: var(--fs-sm) / 1.45 var(--font-mono); }
 .due { color: var(--signal); font-weight: 600; }
 
 .ladder { display: inline-flex; gap: 2px; }
-.ladder i { width: 10px; height: 4px; border-radius: 1px; background: var(--surface-3); transition: background-color var(--dur-slow) var(--ease-out); }
-.ladder i.on { background: var(--learn); }
-.ladder.review i.on { background: var(--signal); }
+.ladder i { width: 10px; height: 5px; border-radius: 1px; border: 1px solid var(--text-faint); transition: background-color var(--dur-slow) var(--ease-out); }
+.ladder i.on { background: var(--learn); border-color: var(--learn); }
+.ladder.review i.on { background: var(--signal); border-color: var(--signal); }
 
 .exercise { border: 1px solid var(--hairline-strong); border-radius: var(--radius); padding: var(--s3); display: grid; gap: var(--s2); background: var(--surface); }
 .exercise fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: var(--s1); }
@@ -284,9 +291,9 @@ textarea.code { font: var(--fs-sm) / 1.45 var(--font-mono); }
 
 /* ---------- reduced motion: same states, no movement */
 @media (prefers-reduced-motion: reduce) {
-  :root:not([data-motion='full']) { --dur-fast: 0ms; --dur-med: 0ms; --dur-slow: 0ms; --stagger: 0ms; }
-  :root:not([data-motion='full']) .scan::after { animation: none; width: 100%; opacity: 0.5; }
-  :root:not([data-motion='full']) * { animation-duration: 0ms !important; }
+  :root { --dur-fast: 0ms; --dur-med: 0ms; --dur-slow: 0ms; --stagger: 0ms; }
+  .scan::after { animation: none; width: 100%; opacity: 0.5; }
+  * { animation-duration: 0ms !important; }
 }
 :root[data-motion='reduce'] { --dur-fast: 0ms; --dur-med: 0ms; --dur-slow: 0ms; --stagger: 0ms; }
 :root[data-motion='reduce'] .scan::after { animation: none; width: 100%; opacity: 0.5; }

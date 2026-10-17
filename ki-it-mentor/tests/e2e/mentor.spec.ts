@@ -24,13 +24,14 @@ test('erste Ansicht, Kontext, drei Tiefen, Folgeaktion, Notiz (lokal)', async ()
   const { app, page } = await launch();
   await expect(page.getByRole('heading', { name: 'Woran arbeitest du?' })).toBeVisible();
   await expect(page.getByText('LOKAL')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Erklären' })).toBeDisabled();
+  await expect(page.getByText('Frage eingeben oder oben Kontext hinzufügen.')).toBeVisible();
   await shot(page, '01-leer-copilot');
 
   await addTextContext(page, 'loadUsers.js', CODE);
   await expect(page.locator('.chip')).toContainText('loadUsers.js');
 
   await page.getByRole('button', { name: 'Erklären' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'wird erstellt' })).toBeVisible();
   const answer = page.getByRole('article');
   await expect(answer).toContainText('Einfach gesagt');
   await shot(page, '02-antwort-einfach');
@@ -63,7 +64,7 @@ test('externer Anbieter: Versand-Manifest, Schwärzung, Abbruch sendet nichts, F
   const { app, page } = await launch({ env: { ANTHROPIC_API_KEY: 'test-key-not-real', ANTHROPIC_BASE_URL: mock.url } });
   await page.getByRole('tab', { name: 'Setup' }).click();
   await page.getByRole('radio', { name: /Anthropic Claude/ }).check();
-  await page.getByRole('tab', { name: 'Mentor' }).click();
+  await page.getByRole('tab', { name: 'Fragen' }).click();
   await expect(page.getByText('EXTERN')).toBeVisible();
 
   await addTextContext(page, 'loadUsers.js', CODE);
@@ -84,6 +85,7 @@ test('externer Anbieter: Versand-Manifest, Schwärzung, Abbruch sendet nichts, F
   await page.keyboard.press('Escape');
   await expect(manifest).toBeHidden();
   expect(mock.requests).toHaveLength(0);
+  await expect(page.getByRole('textbox', { name: 'Frage an den Mentor' })).toBeFocused();
 
   await page.getByRole('button', { name: 'Fragen' }).click();
   await expect(page.getByRole('button', { name: /Senden/ })).toBeFocused();
@@ -99,6 +101,13 @@ test('externer Anbieter: Versand-Manifest, Schwärzung, Abbruch sendet nichts, F
   await expect(page.getByText('extern, nach Bestätigung gesendet')).toBeVisible();
   await shot(page, '05-antwort-extern-beleg');
 
+  // A renderer that skips the manifest gets nothing sent: main requires a confirmed manifestId.
+  const bypass = await page.evaluate(() =>
+    window.mentor.run('bypass', 'anthropic', { mode: 'copilot', depth: 'simple', action: 'explain', question: 'x', context: [] }),
+  );
+  expect(bypass).toMatchObject({ ok: false, code: 'bad_request' });
+  expect(mock.requests).toHaveLength(1);
+
   // Rate limit → typed, understandable error with retry.
   mock.status = 429;
   await page.getByRole('radio', { name: 'Präzise' }).click();
@@ -106,9 +115,23 @@ test('externer Anbieter: Versand-Manifest, Schwärzung, Abbruch sendet nichts, F
   // The SDK honours retry-after (7 s) once before giving up; the UI shows elapsed time meanwhile.
   await expect(page.getByRole('alert')).toContainText('Ratenlimit', { timeout: 20_000 });
   expect(mock.requests).toHaveLength(3);
+  await expect(page.getByRole('button', { name: /Erneut senden in \d+ s/ })).toBeDisabled();
+  await expect(page.getByRole('article')).toContainText('zeigt noch: Einfach');
   await shot(page, '06-fehler-ratenlimit');
   await app.close();
   await mock.close();
+});
+
+test('Esc bricht eine laufende Anfrage ab, auch ohne Fokus im Panel', async () => {
+  const { app, page } = await launch({ env: { KI_MENTOR_DEMO_DELAY_MS: '4000' } });
+  await addTextContext(page, 'a.js', 'const a = 1;');
+  await page.getByRole('button', { name: 'Erklären' }).click();
+  await expect(page.getByRole('button', { name: /Abbrechen/ })).toBeFocused();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('live')).toHaveText('Abgebrochen.');
+  await expect(page.getByRole('article')).toHaveCount(0);
+  await app.close();
 });
 
 test('Lernpfad: Lesen ≠ Können, Übung hebt Status, Fortschritt bleibt nach Neustart', async () => {
@@ -123,9 +146,9 @@ test('Lernpfad: Lesen ≠ Können, Übung hebt Status, Fortschritt bleibt nach N
   await expect(page.getByRole('article')).toContainText('Prüfe dich selbst');
   await expect(page.locator('.app')).toHaveAttribute('data-mode', 'learn');
 
+  // The learning tab stays where it was (topic detail), now showing the exposure step.
   await page.getByRole('tab', { name: 'Lernpfad' }).click();
-  await expect(page.getByRole('button', { name: /Commit, Staging und Historie, Status: Eingeführt/ })).toBeVisible();
-  await page.getByRole('button', { name: /Commit, Staging und Historie/ }).click();
+  await expect(page.locator('header').filter({ hasText: 'Commit, Staging und Historie' })).toContainText('Eingeführt');
 
   await page.getByRole('listitem').filter({ hasText: 'Erkläre mit eigenen Worten' }).getByRole('button', { name: 'Starten' }).click();
   await page.getByRole('textbox', { name: 'Deine Antwort' }).fill('Damit kann ich gezielt auswählen, welche Änderungen in den nächsten Commit kommen.');
@@ -151,6 +174,19 @@ test('Lernpfad: Lesen ≠ Können, Übung hebt Status, Fortschritt bleibt nach N
   await second.app.close();
 });
 
+test('Notiz überlebt sofortiges Schließen (Debounce wird beim Beenden geschrieben)', async () => {
+  const first = await launch();
+  await addTextContext(first.page, 'a.js', 'const a = 1;');
+  await first.page.getByRole('button', { name: 'Erklären' }).click();
+  await first.page.getByRole('button', { name: 'Als Notiz speichern' }).click();
+  await expect(first.page.getByRole('button', { name: 'Gespeichert ✓' })).toBeDisabled();
+  await first.app.close(); // well inside the 250 ms debounce
+  const second = await launch({ dataDir: first.dataDir });
+  await second.page.getByRole('tab', { name: /Notizen/ }).click();
+  await expect(second.page.locator('.card')).toHaveCount(1);
+  await second.app.close();
+});
+
 test('Claude Code Hook → Inbox → als Kontext übernehmen', async () => {
   const { app, page, inboxDir } = await launch();
   const hook = join(__dirname, '../../dist/claude-code-hook.cjs');
@@ -161,7 +197,7 @@ test('Claude Code Hook → Inbox → als Kontext übernehmen', async () => {
   await page.getByRole('tab', { name: 'Setup' }).click();
   await page.getByRole('checkbox', { name: /Ereignisse aus Claude Code/ }).check();
   await shot(page, '09-setup');
-  await page.getByRole('tab', { name: 'Mentor' }).click();
+  await page.getByRole('tab', { name: 'Fragen' }).click();
   await page.getByRole('button', { name: 'Claude Code' }).click();
   await expect(page.getByText('Edit · src/login.ts')).toBeVisible();
   await page.getByRole('button', { name: 'Übernehmen' }).click();
@@ -182,7 +218,7 @@ test('Reduced Motion, Hell-Modus und schmale Breite', async () => {
   await page.getByRole('combobox', { name: 'Farbschema' }).selectOption('light');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(360, 560));
-  await page.getByRole('tab', { name: 'Mentor' }).click();
+  await page.getByRole('tab', { name: 'Fragen' }).click();
   await addTextContext(page, 'ein-sehr-langer-dateiname-der-umbrechen-oder-abgeschnitten-werden-muss.ts', 'const x = 1;');
   await page.getByRole('button', { name: 'Erklären' }).click();
   await expect(page.getByRole('article')).toBeVisible();
@@ -194,7 +230,7 @@ test('Reduced Motion, Hell-Modus und schmale Breite', async () => {
   await page.getByRole('tab', { name: 'Setup' }).click();
   await page.getByRole('combobox', { name: 'Farbschema' }).selectOption('dark');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  await page.getByRole('tab', { name: 'Mentor' }).click();
+  await page.getByRole('tab', { name: 'Fragen' }).click();
   await page.getByRole('radio', { name: 'Lernen' }).click();
   await expect(page.locator('.app')).toHaveAttribute('data-mode', 'learn');
   await shot(page, '12-dunkel-lernmodus');

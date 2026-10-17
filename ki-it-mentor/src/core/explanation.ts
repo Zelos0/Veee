@@ -32,7 +32,7 @@ export const ACTION_LABELS: Record<ActionKind, string> = {
 };
 
 export const SOURCE_LABELS: Record<ContextSource, string> = {
-  manual: 'Manuell',
+  manual: 'Text',
   file: 'Datei',
   diff: 'Diff',
   'claude-code': 'Claude Code',

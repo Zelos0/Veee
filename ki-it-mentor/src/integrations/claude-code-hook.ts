@@ -8,12 +8,25 @@
 // Im Hook-Modus endet der Prozess immer mit Exit-Code 0 und ohne stdout-Ausgabe:
 // der Mentor darf Claude Code nie blockieren oder beeinflussen.
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { hookSettingsSnippet, summarizeHookInput, type HookInput } from '../core/claude-code';
-import { inboxFile } from './inbox-path';
+import { hookCommandFor, inboxFile } from './inbox-path';
 
 export const MAX_INBOX_BYTES = 512 * 1024;
+export const MAX_ROTATED_FILES = 3;
+/** Hard upper bound for one hook run; Claude Code must never wait on the mentor. */
+export const HOOK_DEADLINE_MS = 3_000;
+
+function rotate(file: string): void {
+  // Unique name per rotation so concurrent hooks never overwrite each other's archive.
+  renameSync(file, `${file}.${Date.now()}-${process.pid}`);
+  const dir = dirname(file);
+  const archives = readdirSync(dir)
+    .filter((n) => n.startsWith(`${basename(file)}.`))
+    .sort();
+  for (const old of archives.slice(0, Math.max(0, archives.length - MAX_ROTATED_FILES))) rmSync(join(dir, old), { force: true });
+}
 
 export function appendEvent(rawStdin: string, env: NodeJS.ProcessEnv = process.env): boolean {
   let input: HookInput;
@@ -26,18 +39,27 @@ export function appendEvent(rawStdin: string, env: NodeJS.ProcessEnv = process.e
   if (!event) return false;
   const file = inboxFile(env);
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-  if (existsSync(file) && statSync(file).size > MAX_INBOX_BYTES) renameSync(file, `${file}.1`);
+  chmodSync(dirname(file), 0o700);
+  if (existsSync(file) && statSync(file).size > MAX_INBOX_BYTES) rotate(file);
   appendFileSync(file, `${JSON.stringify(event)}\n`, { mode: 0o600 });
+  chmodSync(file, 0o600);
   return true;
 }
 
 const MARKER = 'claude-code-hook.cjs';
 
 function hookCommand(): string {
-  return `node ${JSON.stringify(resolve(__filename))}`;
+  return hookCommandFor(resolve(__filename));
 }
 
-type HookEntry = { matcher?: string; hooks?: Array<{ type: string; command: string }> };
+function writeAtomic(path: string, content: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync(tmp, content);
+  renameSync(tmp, path);
+}
+
+type HookEntry = { matcher?: string; hooks?: Array<{ type: string; command?: string }> };
 type SettingsFile = { hooks?: Record<string, HookEntry[]> } & Record<string, unknown>;
 
 export function installInto(settingsPath: string, command = hookCommand()): void {
@@ -48,16 +70,18 @@ export function installInto(settingsPath: string, command = hookCommand()): void
   for (const [event, entries] of Object.entries(snippet.hooks)) {
     settings.hooks[event] = [...(settings.hooks[event] ?? []), ...entries];
   }
-  mkdirSync(dirname(settingsPath), { recursive: true });
-  writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+  writeAtomic(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
 export function uninstallFrom(settings: SettingsFile): SettingsFile {
   if (!settings.hooks) return settings;
   for (const [event, entries] of Object.entries(settings.hooks)) {
+    // Foreign structures (non-arrays, prompt hooks without `command`) are left untouched.
+    if (!Array.isArray(entries)) continue;
+    const ours = (h: { command?: unknown }) => typeof h?.command === 'string' && h.command.includes(MARKER);
     const kept = entries
-      .map((e) => ({ ...e, hooks: (e.hooks ?? []).filter((h) => !h.command.includes(MARKER)) }))
-      .filter((e) => e.hooks.length > 0);
+      .map((e) => (Array.isArray(e?.hooks) ? { ...e, hooks: e.hooks.filter((h) => !ours(h)) } : e))
+      .filter((e) => !Array.isArray(e?.hooks) || e.hooks.length > 0);
     if (kept.length) settings.hooks[event] = kept;
     else delete settings.hooks[event];
   }
@@ -85,11 +109,15 @@ function main(): void {
       return;
     }
     if (command === 'install') installInto(path);
-    else if (existsSync(path)) writeFileSync(path, `${JSON.stringify(uninstallFrom(JSON.parse(readFileSync(path, 'utf8')) as SettingsFile), null, 2)}\n`);
+    else if (existsSync(path)) writeAtomic(path, `${JSON.stringify(uninstallFrom(JSON.parse(readFileSync(path, 'utf8')) as SettingsFile), null, 2)}\n`);
     process.stdout.write(`${command === 'install' ? 'Installiert' : 'Entfernt'}: ${path}\n`);
     return;
   }
 
+  // Interactive terminal: nothing to read — exit instead of waiting forever.
+  if (process.stdin.isTTY) return;
+  setTimeout(() => process.exit(0), HOOK_DEADLINE_MS).unref();
+  process.stdin.on('error', () => process.exit(0));
   let data = '';
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (chunk) => (data += chunk));

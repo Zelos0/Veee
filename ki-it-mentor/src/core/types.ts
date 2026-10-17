@@ -73,6 +73,8 @@ export interface RedactionFinding {
 
 /** Exactly what would leave the machine for one request — the "Versand-Manifest". */
 export interface SendManifest {
+  /** Set by the main process; an external send must present it (single use, short-lived). */
+  manifestId?: string;
   providerId: string;
   providerLabel: string;
   providerKind: ProviderKind;

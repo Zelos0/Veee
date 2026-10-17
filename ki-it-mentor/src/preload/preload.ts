@@ -9,7 +9,10 @@ const api: MentorApi = {
   wipeAll: () => ipcRenderer.invoke('state:wipe'),
   listProviders: () => ipcRenderer.invoke('providers:list'),
   preview: (providerId, request) => ipcRenderer.invoke('explain:preview', providerId, request),
-  run: (runId, providerId, request) => ipcRenderer.invoke('explain:run', runId, providerId, request),
+  run: (runId, providerId, request, manifestId) => ipcRenderer.invoke('explain:run', runId, providerId, request, manifestId),
+  saveStateSync: (state) => {
+    ipcRenderer.sendSync('state:saveSync', state);
+  },
   cancel: (runId) => ipcRenderer.invoke('explain:cancel', runId),
   openFile: () => ipcRenderer.invoke('file:open'),
   exportNotes: (format) => ipcRenderer.invoke('notes:export', format),

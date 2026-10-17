@@ -1,7 +1,7 @@
 // Lernpfad: Themen nach Bereich, Statusleiter, fällige Wiederholungen, Übungen.
 // Status steigt nur durch eigene Leistung (Übungen), nie durch bloßes Lesen.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { DOMAINS, TOPICS, exercisesFor, topicById, type Topic } from '../../core/curriculum';
 import { getProgress, type MentorState } from '../../core/knowledge';
 import {
@@ -43,7 +43,13 @@ export function LearnPanel(props: {
   announce: (m: string) => void;
 }) {
   const [topicId, setTopicId] = useState<string | null>(null);
+  const [returnTo, setReturnTo] = useState<string | null>(null);
   const now = new Date();
+
+  // Return focus to the row of the topic we came back from.
+  useEffect(() => {
+    if (!topicId && returnTo) document.getElementById(`topic-${returnTo}`)?.focus();
+  }, [topicId, returnTo]);
 
   const due = useMemo(() => TOPICS.filter((t) => isDue(getProgress(props.state, t.id), now)), [props.state]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -53,7 +59,10 @@ export function LearnPanel(props: {
       <TopicDetail
         topic={topic}
         progress={refreshDue(getProgress(props.state, topic.id))}
-        onBack={() => setTopicId(null)}
+        onBack={() => {
+          setReturnTo(topicId);
+          setTopicId(null);
+        }}
         onProgress={props.onProgress}
         onExplain={() => props.onExplain(topic)}
         onSaveNote={(title, body) => props.onSaveNote(title, body, topic.id)}
@@ -64,6 +73,9 @@ export function LearnPanel(props: {
 
   return (
     <div className="learn">
+      <p className="faint" style={{ margin: 0, fontSize: 'var(--fs-xs)' }}>
+        Leiter: 1 Eingeführt · 2 Selbst erklärt · 3 Angeleitet angewendet · 4 Selbstständig angewendet. Aufsteigen nur durch Übungen.
+      </p>
       {due.length > 0 && (
         <section aria-label="Fällige Wiederholungen">
           <h2 className="section-title due">Fällig zur Wiederholung · {due.length}</h2>
@@ -95,7 +107,7 @@ function TopicList({ topics, state, onOpen }: { topics: Topic[]; state: MentorSt
         const exercises = exercisesFor(t.id).length;
         return (
           <li key={t.id}>
-            <button type="button" className="topic-row" onClick={() => onOpen(t.id)} aria-label={`${t.title}, Status: ${STATUS_LABELS[p.status]}`}>
+            <button type="button" id={`topic-${t.id}`} className="topic-row" onClick={() => onOpen(t.id)} aria-label={`${t.title}, Status: ${STATUS_LABELS[p.status]}`}>
               <span>{t.title}</span>
               <span className="st">
                 <Ladder progress={p} />
@@ -123,6 +135,8 @@ function TopicDetail(props: {
   const exercises = exercisesFor(topic.id);
   const [active, setActive] = useState<Exercise | null>(null);
   const [levelUp, setLevelUp] = useState<string | null>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => headingRef.current?.focus(), []);
 
   return (
     <div className="learn">
@@ -133,7 +147,9 @@ function TopicDetail(props: {
       </div>
       <header style={{ display: 'grid', gap: 'var(--s1)' }}>
         <span className="mono faint" style={{ fontSize: 'var(--fs-xs)' }}>{topic.domain}</span>
-        <h2 style={{ margin: 0, fontSize: 'var(--fs-lg)' }}>{topic.title}</h2>
+        <h2 ref={headingRef} tabIndex={-1} style={{ margin: 0, fontSize: 'var(--fs-lg)' }}>
+          {topic.title}
+        </h2>
         <p className="muted" style={{ margin: 0 }}>{topic.summary}</p>
         <div className="row" style={{ fontSize: 'var(--fs-sm)' }}>
           <Ladder progress={progress} />
@@ -164,10 +180,15 @@ function TopicDetail(props: {
             const next = applyEvidence(progress, evidenceFor(active, evaluation, usedHints));
             props.onProgress(next);
             setLevelUp(ladderLevel(next) > ladderLevel(progress) ? `↑ ${STATUS_LABELS[next.status]}` : null);
-            if (next.status !== progress.status) props.announce(`Status: ${STATUS_LABELS[next.status]}`);
+            props.announce(
+              `${evaluation.passed ? 'Bestanden' : 'Noch nicht bestanden'}. ${evaluation.feedback}${next.status !== progress.status ? ` Status: ${STATUS_LABELS[next.status]}.` : ''}`,
+            );
           }}
           onSaveNote={props.onSaveNote}
-          onClose={() => setActive(null)}
+          onClose={() => {
+            setActive(null);
+            requestAnimationFrame(() => headingRef.current?.focus());
+          }}
         />
       ) : (
         <section aria-label="Übungen">
@@ -208,6 +229,10 @@ function ExerciseRunner(props: {
   const [text, setText] = useState('');
   const [hints, setHints] = useState(0);
   const [result, setResult] = useState<Evaluation | null>(null);
+  const feedbackRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (result) feedbackRef.current?.focus();
+  }, [result]);
 
   const submit = () => {
     const evaluation = evaluateAnswer(exercise, exercise.kind === 'multiple-choice' ? (choice ?? -1) : text, hints);
@@ -247,7 +272,7 @@ function ExerciseRunner(props: {
       )}
       {result ? (
         <>
-          <div className={`feedback ${result.passed ? 'pass' : 'fail'}`} role="status">
+          <div ref={feedbackRef} tabIndex={-1} className={`feedback ${result.passed ? 'pass' : 'fail'}`}>
             <strong>{result.passed ? 'Bestanden' : 'Noch nicht'}</strong> — {result.feedback}
             {result.method === 'rubric-heuristic' && (
               <div className="faint" style={{ fontSize: 'var(--fs-xs)' }}>

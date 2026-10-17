@@ -8,6 +8,14 @@ describe('OllamaProvider', () => {
     expect(new OllamaProvider().info().configured).toBe(false);
   });
 
+  it('treats only loopback addresses as local', () => {
+    expect(new OllamaProvider({ model: 'm' }).info().kind).toBe('local');
+    expect(new OllamaProvider({ model: 'm', baseUrl: 'http://localhost:11434' }).info().kind).toBe('local');
+    const remote = new OllamaProvider({ model: 'm', baseUrl: 'http://gpu-box.lan:11434' }).info();
+    expect(remote.kind).toBe('external');
+    expect(remote.label).toContain('entfernt');
+  });
+
   it('posts system + messages to /api/chat and parses the reply', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: { content: ' Hallo ' }, prompt_eval_count: 3, eval_count: 4 })));
     const p = new OllamaProvider({ model: 'qwen', baseUrl: 'http://h:1/', fetchImpl });

@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseInbox, summarizeHookInput } from '../../src/core/claude-code';
 import { appendEvent, installInto, uninstallFrom } from '../../src/integrations/claude-code-hook';
-import { inboxFile } from '../../src/integrations/inbox-path';
+import { spawn } from 'node:child_process';
+import { hookCommandFor, inboxFile } from '../../src/integrations/inbox-path';
 
 describe('summarizeHookInput', () => {
   it('turns an Edit into a redacted mini diff', () => {
@@ -66,4 +67,33 @@ describe('hook CLI', () => {
     expect(JSON.stringify(cleaned)).toContain('other-hook');
     expect(existsSync(path)).toBe(true);
   });
+});
+
+describe('hook hardening (review round 1)', () => {
+  it('quotes the hook path so shell metacharacters stay literal', () => {
+    expect(hookCommandFor("/opt/my app/$HOME/it's.cjs", 'linux')).toBe(`node '/opt/my app/$HOME/it'\\''s.cjs'`);
+    expect(hookCommandFor('C:\\Apps\\Mentor\\hook.cjs', 'win32')).toBe('node "C:\\Apps\\Mentor\\hook.cjs"');
+  });
+
+  it('uninstall tolerates foreign settings structures', () => {
+    const settings = {
+      hooks: {
+        Stop: 'not-an-array',
+        PreToolUse: [{ hooks: [{ type: 'prompt', prompt: 'x' }] }, { matcher: 'X' }],
+        PostToolUse: [{ hooks: [{ type: 'command', command: "node '/a/claude-code-hook.cjs'" }] }],
+      },
+    } as unknown as Parameters<typeof uninstallFrom>[0];
+    const cleaned = uninstallFrom(settings) as unknown as { hooks: Record<string, unknown> };
+    expect(cleaned.hooks.Stop).toBe('not-an-array');
+    expect(cleaned.hooks.PreToolUse).toHaveLength(2);
+    expect(cleaned.hooks.PostToolUse).toBeUndefined();
+  });
+
+  it('the built hook exits promptly even if stdin is never closed', async () => {
+    const started = Date.now();
+    const child = spawn('node', [join(__dirname, '../../dist/claude-code-hook.cjs')], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, KI_MENTOR_INBOX: mkdtempSync(join(tmpdir(), 'inbox-')) } });
+    const code = await new Promise<number | null>((resolve) => child.on('exit', resolve));
+    expect(code).toBe(0);
+    expect(Date.now() - started).toBeLessThan(6000);
+  }, 10_000);
 });

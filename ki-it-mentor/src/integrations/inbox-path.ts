@@ -11,3 +11,12 @@ export function inboxDir(env: NodeJS.ProcessEnv = process.env): string {
 export function inboxFile(env: NodeJS.ProcessEnv = process.env): string {
   return join(inboxDir(env), 'claude-code.jsonl');
 }
+
+/**
+ * Shell command Claude Code runs. POSIX: single quotes, so `$`, backticks and
+ * spaces in the path stay literal. Windows (cmd): double quotes.
+ */
+export function hookCommandFor(scriptPath: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'win32') return `node "${scriptPath.replace(/"/g, '')}"`;
+  return `node '${scriptPath.replace(/'/g, `'\\''`)}'`;
+}

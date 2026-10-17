@@ -23,6 +23,10 @@ export class FileBackend implements StateBackend {
   }
 
   async save(state: MentorState): Promise<void> {
+    this.saveSync(state);
+  }
+
+  saveSync(state: MentorState): void {
     mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
     const tmp = `${this.file}.tmp`;
     writeFileSync(tmp, JSON.stringify(state, null, 2), { mode: 0o600 });

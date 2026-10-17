@@ -24,7 +24,10 @@ export interface MentorApi {
   wipeAll(): Promise<MentorState>;
   listProviders(): Promise<ProviderInfo[]>;
   preview(providerId: string, request: ExplainRequest): Promise<SendManifest>;
-  run(runId: string, providerId: string, request: ExplainRequest): Promise<RunResult>;
+  /** External providers require the manifestId returned by preview(); local ones may omit it. */
+  run(runId: string, providerId: string, request: ExplainRequest, manifestId?: string): Promise<RunResult>;
+  /** Synchronous last-chance save used on window close. */
+  saveStateSync(state: MentorState): void;
   cancel(runId: string): Promise<void>;
   openFile(): Promise<{ label: string; content: string; truncated: boolean } | null>;
   exportNotes(format: 'json' | 'md'): Promise<{ saved: boolean; path?: string }>;
