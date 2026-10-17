@@ -62,6 +62,14 @@ export function SetupPanel(props: {
             Immer im Vordergrund
           </label>
           <label className="switch">
+            Farbschema
+            <select aria-label="Farbschema" value={settings.theme} onChange={(e) => props.onSettings({ theme: e.target.value as Settings['theme'] })}>
+              <option value="system">System</option>
+              <option value="light">Hell</option>
+              <option value="dark">Dunkel</option>
+            </select>
+          </label>
+          <label className="switch">
             <input type="checkbox" checked={settings.reducedMotion === 'reduce'} onChange={(e) => props.onSettings({ reducedMotion: e.target.checked ? 'reduce' : 'system' })} />
             Bewegung reduzieren (sonst Systemeinstellung)
           </label>

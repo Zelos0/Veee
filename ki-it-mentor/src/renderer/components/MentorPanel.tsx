@@ -481,32 +481,35 @@ export function MentorPanel(props: {
             )}
           </div>
         </div>
-        <textarea
-          ref={questionRef}
-          aria-label="Frage an den Mentor"
-          placeholder={mode === 'learn' ? 'Was ist unklar? (Strg+Enter)' : 'Frage oder Aufgabe … (Strg+Enter)'}
-          value={question}
-          disabled={busy}
-          onChange={(e) => setQuestion(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-        />
-        <div className="composer-row">
-          {provider && (
-            <span className={`dest ${provider.kind}`} title={provider.kind === 'external' ? 'Sendet nach Bestätigung an einen externen Dienst' : 'Bleibt auf diesem Rechner'}>
-              <span className="tag">{provider.kind === 'external' ? 'EXTERN' : 'LOKAL'}</span>
-              {provider.label}
-              {!provider.configured && <span className="due"> · nicht eingerichtet</span>}
-            </span>
-          )}
-          <span className="spacer" />
-          <button type="button" className="btn primary" onClick={() => submit()} disabled={busy}>
-            {question.trim() ? 'Fragen' : 'Erklären'}
-          </button>
+        {/* While confirming, the composer becomes the manifest: the input steps aside. */}
+        <div hidden={phase.kind === 'confirm'} style={{ display: phase.kind === 'confirm' ? 'none' : 'grid', gap: 'var(--s2)' }}>
+          <textarea
+            ref={questionRef}
+            aria-label="Frage an den Mentor"
+            placeholder={mode === 'learn' ? 'Was ist unklar? (Strg+Enter)' : 'Frage oder Aufgabe … (Strg+Enter)'}
+            value={question}
+            disabled={busy}
+            onChange={(e) => setQuestion(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+          />
+          <div className="composer-row">
+            {provider && (
+              <span className={`dest ${provider.kind}`} title={provider.kind === 'external' ? 'Sendet nach Bestätigung an einen externen Dienst' : 'Bleibt auf diesem Rechner'}>
+                <span className="tag">{provider.kind === 'external' ? 'EXTERN' : 'LOKAL'}</span>
+                {provider.label}
+                {!provider.configured && <span className="due"> · nicht eingerichtet</span>}
+              </span>
+            )}
+            <span className="spacer" />
+            <button type="button" className="btn primary" onClick={() => submit()} disabled={busy}>
+              {question.trim() ? 'Fragen' : 'Erklären'}
+            </button>
+          </div>
         </div>
       </section>
     </div>

@@ -69,7 +69,7 @@ function extract(request: ProviderRequest): { context: string; question: string 
 function factsBlock(f: CodeFacts, depth: Depth): string {
   const rows = [
     `- Sprache (heuristisch erkannt): ${f.language}`,
-    `- Umfang: ${f.lines} Zeilen${f.imports ? `, ${f.imports} Import(e)` : ''}`,
+    `- Umfang: ${f.lines} Zeile${f.lines === 1 ? '' : 'n'}${f.imports ? `, ${f.imports} Import(e)` : ''}`,
   ];
   if (f.functions.length) rows.push(`- Benannte Funktionen: ${f.functions.map((n) => `\`${n}\``).join(', ')}`);
   if (f.isDiff) rows.push(`- Diff: +${f.added} / −${f.removed} Zeilen`);
@@ -82,7 +82,7 @@ function body(depth: Depth, mode: Mode, action: ActionKind, f: CodeFacts | null,
   const topic = f
     ? f.functions.length
       ? `den ${f.language}-Code mit ${f.functions.map((n) => `\`${n}\``).join(', ')}`
-      : `den ${f.language}-Ausschnitt (${f.lines} Zeilen)`
+      : `den ${f.language}-Ausschnitt (${f.lines} Zeile${f.lines === 1 ? '' : 'n'})`
     : `deine Frage „${question}“`;
 
   const sections: string[] = [];

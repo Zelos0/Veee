@@ -26,6 +26,11 @@ describe('summarizeHookInput', () => {
     expect(bash.content).toContain('[REDACTED:token]');
   });
 
+  it('shows paths relative to the project directory', () => {
+    const ev = summarizeHookInput({ hook_event_name: 'PostToolUse', tool_name: 'Write', cwd: '/w/p', tool_input: { file_path: '/w/p/src/x.ts', content: '' } })!;
+    expect(ev.label).toBe('Write · src/x.ts');
+  });
+
   it('ignores events without a tool', () => {
     expect(summarizeHookInput({ hook_event_name: 'Stop' })).toBeNull();
   });

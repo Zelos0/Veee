@@ -47,7 +47,10 @@ export function summarizeHookInput(input: HookInput, now = new Date()): InboxEve
   const event = str(input.hook_event_name) || 'unknown';
   const tool = str(input.tool_name) || undefined;
   const ti = input.tool_input ?? {};
-  const filePath = str(ti.file_path) || str(ti.notebook_path) || str(ti.path);
+  const rawPath = str(ti.file_path) || str(ti.notebook_path) || str(ti.path);
+  const cwd = str(input.cwd);
+  // Show project-relative paths; the full path stays available via `cwd`.
+  const filePath = cwd && rawPath.startsWith(`${cwd}/`) ? rawPath.slice(cwd.length + 1) : rawPath;
   const base = { id: `cc_${now.getTime().toString(36)}_${Math.random().toString(36).slice(2, 7)}`, receivedAt: now.toISOString(), event, tool, cwd: input.cwd };
 
   if (event === 'UserPromptSubmit') {

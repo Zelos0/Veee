@@ -40,6 +40,17 @@ export function App() {
     document.documentElement.dataset.motion = state.settings.reducedMotion === 'reduce' ? 'reduce' : '';
   }, [state?.settings.reducedMotion]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const theme = state?.settings.theme ?? 'system';
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: light)');
+    const apply = () => {
+      document.documentElement.dataset.theme = theme === 'system' ? (media.matches ? 'light' : 'dark') : theme;
+    };
+    apply();
+    media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
+  }, [theme]);
+
   const update = useCallback((fn: (s: MentorState) => MentorState) => {
     setState((prev) => {
       if (!prev) return prev;
@@ -63,7 +74,7 @@ export function App() {
     if (activeTopic) update((s) => setProgress(s, applyEvidence(getProgress(s, activeTopic), { kind: 'explanation_viewed' })));
   }, [activeTopic, update]);
 
-  const onKeyDown = (e: KeyboardEvent) => {
+  const onKeyDown = (e: KeyboardEvent | globalThis.KeyboardEvent) => {
     if (e.altKey && !e.ctrlKey && /^[1-4]$/.test(e.key)) {
       e.preventDefault();
       setTab(TABS[Number(e.key) - 1]!.id);
@@ -76,17 +87,26 @@ export function App() {
     }
   };
 
+  // Window-level so shortcuts also work when nothing inside the app has focus.
+  const keyHandler = useRef(onKeyDown);
+  keyHandler.current = onKeyDown;
+  useEffect(() => {
+    const listener = (e: globalThis.KeyboardEvent) => keyHandler.current(e);
+    window.addEventListener('keydown', listener);
+    return () => window.removeEventListener('keydown', listener);
+  }, []);
+
   if (!state) return <div className="pad muted" role="status">Lade …</div>;
 
   const provider = providers.find((p) => p.id === state.settings.providerId) ?? providers.find((p) => p.id === 'demo');
   const mode = state.settings.mode;
 
   return (
-    <div className="app" data-mode={mode} onKeyDown={onKeyDown}>
+    <div className="app" data-mode={mode}>
       <header className="titlebar">
         <span className="brand">
           <span className="brand-dot" aria-hidden="true" />
-          KI-IT-Mentor
+          <span className="brand-text">KI-IT-Mentor</span>
         </span>
         <Segmented<Mode>
           label="Modus"

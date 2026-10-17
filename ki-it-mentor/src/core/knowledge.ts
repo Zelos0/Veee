@@ -24,6 +24,7 @@ export interface Settings {
   /** Ask before every external send. Cannot be disabled for external providers in the MVP. */
   confirmExternalSend: true;
   reducedMotion: 'system' | 'reduce';
+  theme: 'system' | 'light' | 'dark';
   claudeCodeInbox: boolean;
 }
 
@@ -41,6 +42,7 @@ export const DEFAULT_SETTINGS: Settings = {
   alwaysOnTop: false,
   confirmExternalSend: true,
   reducedMotion: 'system',
+  theme: 'system',
   claudeCodeInbox: false,
 };
 
